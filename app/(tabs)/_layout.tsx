@@ -136,7 +136,7 @@ export default function TabLayout() {
         <Tabs.Screen name="progress" options={{ href: null }} />
       </Tabs>
 
-      {/* <FloatingCameraButton /> */}
+      <FloatingCameraButton />
 
       {/* Menu Popup */}
       <Modal
