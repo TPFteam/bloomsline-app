@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { View, Text, TouchableOpacity, Modal, Pressable, Alert } from 'react-native'
+import { useState, useEffect, useRef } from 'react'
+import { View, Text, TouchableOpacity, Modal, Pressable, Alert, Animated } from 'react-native'
 import { Tabs, useRouter } from 'expo-router'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { LinearGradient } from 'expo-linear-gradient'
@@ -20,29 +20,47 @@ const menuItems = [
 function FloatingCameraButton() {
   const router = useRouter()
   const insets = useSafeAreaInsets()
+  const bounce = useRef(new Animated.Value(0)).current
+
+  useEffect(() => {
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(bounce, { toValue: -6, duration: 1200, useNativeDriver: true }),
+        Animated.timing(bounce, { toValue: 0, duration: 1200, useNativeDriver: true }),
+      ])
+    ).start()
+  }, [bounce])
+
   return (
-    <TouchableOpacity
-      onPress={() => router.push('/capture')}
-      style={{
-        position: 'absolute',
-        bottom: Math.max(insets.bottom, 16) + 100,
-        right: 20,
-        width: 56,
-        height: 56,
-        borderRadius: 28,
-        alignItems: 'center',
-        justifyContent: 'center',
-        backgroundColor: '#fb7185',
-        shadowColor: '#f43f5e',
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.3,
-        shadowRadius: 8,
-        elevation: 8,
-        zIndex: 100,
-      }}
-    >
-      <Camera size={24} color="#ffffff" />
-    </TouchableOpacity>
+    <Animated.View style={{
+      position: 'absolute',
+      bottom: Math.max(insets.bottom, 16) + 68,
+      right: 24,
+      zIndex: 100,
+      transform: [{ translateY: bounce }],
+    }}>
+      <TouchableOpacity
+        onPress={() => router.push('/capture')}
+        activeOpacity={0.85}
+        style={{
+          width: 60,
+          height: 60,
+          borderRadius: 30,
+          alignItems: 'center',
+          justifyContent: 'center',
+          backgroundColor: '#fb7185',
+          shadowColor: '#f43f5e',
+          shadowOffset: { width: 0, height: 6 },
+          shadowOpacity: 0.35,
+          shadowRadius: 12,
+          elevation: 10,
+          borderWidth: 3,
+          borderColor: '#fff',
+        }}
+      >
+        <Camera size={24} color="#ffffff" />
+      </TouchableOpacity>
+    </Animated.View>
   )
 }
 
