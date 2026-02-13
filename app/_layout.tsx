@@ -1,4 +1,5 @@
 import { useEffect } from 'react'
+import { Platform } from 'react-native'
 import { useFonts } from 'expo-font'
 import { Stack, useRouter, useSegments } from 'expo-router'
 import * as SplashScreen from 'expo-splash-screen'
@@ -62,6 +63,13 @@ export default function RootLayout() {
   useEffect(() => {
     if (loaded) SplashScreen.hideAsync()
   }, [loaded])
+
+  // Register service worker for PWA install on web
+  useEffect(() => {
+    if (Platform.OS === 'web' && 'serviceWorker' in navigator) {
+      navigator.serviceWorker.register('/sw.js').catch(() => {})
+    }
+  }, [])
 
   if (!loaded) return null
 
