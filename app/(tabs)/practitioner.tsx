@@ -29,7 +29,6 @@ import {
   CheckCircle2,
   Sparkles,
   CalendarCheck,
-  ArrowLeft,
   Users,
   BookOpen,
 } from 'lucide-react-native'
@@ -71,10 +70,14 @@ interface UpcomingSession {
 
 interface ResourceItem {
   id: string
+  resourceId: string
   type: 'assignment' | 'shared'
   title: string
+  description: string | null
   status: 'pending' | 'in_progress' | 'completed'
   dueDate: string | null
+  instructions: string | null
+  resourceType: string | null
 }
 
 // ============================================
@@ -141,6 +144,9 @@ export default function PractitionerScreen() {
   const [showAllHistory, setShowAllHistory] = useState(false)
   const [actionLoading, setActionLoading] = useState<string | null>(null)
 
+  // Resource detail modal
+  const [viewingResource, setViewingResource] = useState<ResourceItem | null>(null)
+
   // Reschedule modal
   const [rescheduleSessionId, setRescheduleSessionId] = useState<string | null>(null)
   const [rescheduleReason, setRescheduleReason] = useState('')
@@ -155,7 +161,7 @@ export default function PractitionerScreen() {
     if (!member?.id) return
 
     try {
-      const [practitionerData, sessionsData] = await Promise.all([
+      const [practitionerData] = await Promise.all([
         fetchPractitioner(member.practitioner_id),
         fetchSessions(member.id),
       ])
@@ -242,37 +248,44 @@ export default function PractitionerScreen() {
     }
   }
 
-  async function fetchResources(memberId: string, practitionerId: string) {
+  async function fetchResources(memberId: string, _practitionerId: string) {
     try {
       // Fetch assignments
       const { data: assignments } = await supabase
         .from('resource_assignments')
-        .select('id, status, due_date, resource:resources(id, title)')
+        .select('id, status, due_date, instructions, resource:resources(id, title, description, type)')
         .eq('member_id', memberId)
         .order('due_date', { ascending: true, nullsFirst: false })
 
       // Fetch shared resources
       const { data: shared } = await supabase
         .from('member_shared_resources')
-        .select('id, viewed_at, resource:resources(id, title)')
+        .select('id, viewed_at, message, resource:resources(id, title, description, type)')
         .eq('member_id', memberId)
         .order('shared_at', { ascending: false })
 
       const items: ResourceItem[] = []
 
+      function extractLocalized(val: any): string {
+        if (!val) return ''
+        if (typeof val === 'string') return val
+        return val.en || Object.values(val)[0] || ''
+      }
+
       if (assignments) {
         for (const a of assignments) {
           const resource = Array.isArray(a.resource) ? a.resource[0] : a.resource
           if (!resource) continue
-          const title = typeof resource.title === 'object'
-            ? (resource.title as any).en || Object.values(resource.title as any)[0]
-            : resource.title
           items.push({
             id: a.id,
+            resourceId: resource.id,
             type: 'assignment',
-            title: title || 'Untitled',
+            title: extractLocalized(resource.title) || 'Untitled',
+            description: extractLocalized(resource.description) || null,
             status: a.status as any,
             dueDate: a.due_date,
+            instructions: (a as any).instructions || null,
+            resourceType: resource.type || null,
           })
         }
       }
@@ -286,15 +299,16 @@ export default function PractitionerScreen() {
         for (const s of shared) {
           const resource = Array.isArray(s.resource) ? s.resource[0] : s.resource
           if (!resource || assignedIds.has(resource.id)) continue
-          const title = typeof resource.title === 'object'
-            ? (resource.title as any).en || Object.values(resource.title as any)[0]
-            : resource.title
           items.push({
             id: s.id,
+            resourceId: resource.id,
             type: 'shared',
-            title: title || 'Untitled',
+            title: extractLocalized(resource.title) || 'Untitled',
+            description: extractLocalized(resource.description) || null,
             status: s.viewed_at ? 'in_progress' : 'pending',
             dueDate: null,
+            instructions: (s as any).message || null,
+            resourceType: resource.type || null,
           })
         }
       }
@@ -553,7 +567,7 @@ export default function PractitionerScreen() {
                 const sc = statusConfig[item.status] || statusConfig.pending
 
                 return (
-                  <TouchableOpacity key={item.id} activeOpacity={0.7} style={{
+                  <TouchableOpacity key={item.id} activeOpacity={0.7} onPress={() => setViewingResource(item)} style={{
                     flexDirection: 'row', alignItems: 'center', gap: 12,
                     backgroundColor: '#fff', borderRadius: 16, padding: 14,
                     borderWidth: 1, borderColor: '#f3f4f6',
@@ -1047,6 +1061,135 @@ export default function PractitionerScreen() {
                 )}
               </TouchableOpacity>
             </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      {/* ============================================ */}
+      {/* RESOURCE DETAIL MODAL */}
+      {/* ============================================ */}
+      <Modal visible={!!viewingResource} transparent animationType="slide" onRequestClose={() => setViewingResource(null)}>
+        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'flex-end' }} onPress={() => setViewingResource(null)}>
+          <Pressable style={{
+            backgroundColor: '#fff', borderTopLeftRadius: 24, borderTopRightRadius: 24,
+            padding: 24, maxHeight: '80%',
+          }} onPress={() => {}}>
+            {viewingResource && (() => {
+              const statusConfig = {
+                pending: { label: 'To do', bg: '#f3f4f6', color: '#6b7280', Icon: FileText },
+                in_progress: { label: 'In progress', bg: '#fef3c7', color: '#92400e', Icon: Clock },
+                completed: { label: 'Completed', bg: '#ecfdf5', color: '#059669', Icon: CheckCircle2 },
+              }
+              const sc = statusConfig[viewingResource.status] || statusConfig.pending
+
+              return (
+                <>
+                  {/* Header */}
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20 }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, flex: 1, marginRight: 12 }}>
+                      <LinearGradient
+                        colors={['#fb7185', '#ec4899']}
+                        style={{ width: 48, height: 48, borderRadius: 14, alignItems: 'center', justifyContent: 'center' }}
+                      >
+                        <FileText size={24} color="#fff" />
+                      </LinearGradient>
+                      <View style={{ flex: 1 }}>
+                        <Text style={{ fontSize: 17, fontWeight: '700', color: '#171717' }}>{viewingResource.title}</Text>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 4 }}>
+                          <View style={{
+                            flexDirection: 'row', alignItems: 'center', gap: 4,
+                            backgroundColor: sc.bg, borderRadius: 8, paddingHorizontal: 8, paddingVertical: 3,
+                          }}>
+                            <sc.Icon size={12} color={sc.color} />
+                            <Text style={{ fontSize: 11, fontWeight: '600', color: sc.color }}>{sc.label}</Text>
+                          </View>
+                          {viewingResource.resourceType && (
+                            <View style={{ backgroundColor: '#f3f4f6', borderRadius: 8, paddingHorizontal: 8, paddingVertical: 3 }}>
+                              <Text style={{ fontSize: 11, fontWeight: '500', color: '#6b7280', textTransform: 'capitalize' }}>
+                                {viewingResource.resourceType.replace(/_/g, ' ')}
+                              </Text>
+                            </View>
+                          )}
+                        </View>
+                      </View>
+                    </View>
+                    <TouchableOpacity onPress={() => setViewingResource(null)}>
+                      <X size={22} color="#9ca3af" />
+                    </TouchableOpacity>
+                  </View>
+
+                  <ScrollView showsVerticalScrollIndicator={false} style={{ maxHeight: 400 }}>
+                    {/* Description */}
+                    {viewingResource.description && (
+                      <View style={{ marginBottom: 16 }}>
+                        <Text style={{ fontSize: 13, fontWeight: '600', color: '#374151', marginBottom: 6 }}>Description</Text>
+                        <Text style={{ fontSize: 14, color: '#6b7280', lineHeight: 20 }}>{viewingResource.description}</Text>
+                      </View>
+                    )}
+
+                    {/* Instructions / Practitioner message */}
+                    {viewingResource.instructions && (
+                      <View style={{
+                        backgroundColor: '#ecfdf5', borderRadius: 14, padding: 14, marginBottom: 16,
+                        borderWidth: 1, borderColor: '#a7f3d0',
+                      }}>
+                        <Text style={{ fontSize: 13, fontWeight: '600', color: '#059669', marginBottom: 4 }}>
+                          {viewingResource.type === 'shared' ? 'Practitioner\'s message' : 'Instructions'}
+                        </Text>
+                        <Text style={{ fontSize: 13, color: '#374151', lineHeight: 19 }}>{viewingResource.instructions}</Text>
+                      </View>
+                    )}
+
+                    {/* Due date */}
+                    {viewingResource.dueDate && (
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 16 }}>
+                        <Calendar size={16} color="#9ca3af" />
+                        <Text style={{ fontSize: 13, color: '#6b7280' }}>
+                          Due: <Text style={{ fontWeight: '600', color: '#171717' }}>{formatDate(viewingResource.dueDate)}</Text>
+                        </Text>
+                      </View>
+                    )}
+
+                    {/* Type badge */}
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 20 }}>
+                      <View style={{
+                        backgroundColor: viewingResource.type === 'assignment' ? '#ede9fe' : '#e0f2fe',
+                        borderRadius: 10, paddingHorizontal: 10, paddingVertical: 5,
+                      }}>
+                        <Text style={{
+                          fontSize: 12, fontWeight: '600',
+                          color: viewingResource.type === 'assignment' ? '#7c3aed' : '#0284c7',
+                        }}>
+                          {viewingResource.type === 'assignment' ? 'Assigned by practitioner' : 'Shared with you'}
+                        </Text>
+                      </View>
+                    </View>
+                  </ScrollView>
+
+                  {/* Action button */}
+                  {viewingResource.status !== 'completed' && (
+                    <TouchableOpacity
+                      onPress={() => {
+                        setViewingResource(null)
+                        if (Platform.OS === 'web') {
+                          alert('Opening resources in the app is coming soon. Please use the web app to complete worksheets.')
+                        } else {
+                          Alert.alert('Coming soon', 'Opening resources in the app is coming soon. Please use the web app to complete worksheets.')
+                        }
+                      }}
+                      style={{
+                        backgroundColor: '#059669', borderRadius: 14, paddingVertical: 14,
+                        alignItems: 'center', marginTop: 8,
+                      }}
+                    >
+                      <Text style={{ color: '#fff', fontSize: 15, fontWeight: '600' }}>
+                        {viewingResource.status === 'in_progress' ? 'Continue' : 'Start'}
+                      </Text>
+                    </TouchableOpacity>
+                  )}
+                </>
+              )
+            })()}
           </Pressable>
         </Pressable>
       </Modal>
