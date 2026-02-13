@@ -75,7 +75,7 @@ export default function DailyStoryScreen() {
     if (!user?.id || !member?.id) return
 
     async function load() {
-      const dateStr = params.date || new Date().toISOString().split('T')[0]
+      const dateStr = (params.date || new Date().toISOString()).split('T')[0]
       const dayStart = new Date(dateStr + 'T00:00:00')
       const dayEnd = new Date(dateStr + 'T23:59:59.999')
 

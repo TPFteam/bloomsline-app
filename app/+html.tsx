@@ -19,7 +19,7 @@ export default function Root({ children }: PropsWithChildren) {
 
         <ScrollViewStyleReset />
 
-        <style dangerouslySetInnerHTML={{ __html: `body{overflow:hidden}#root{display:flex;flex:1}` }} />
+        <style dangerouslySetInnerHTML={{ __html: `html,body{height:100%;margin:0}body{overflow-x:hidden;overscroll-behavior-y:auto}#root{display:flex;flex:1;height:100%}` }} />
       </head>
       <body>{children}</body>
     </html>

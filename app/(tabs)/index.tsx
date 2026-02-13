@@ -277,7 +277,7 @@ export default function HomeScreen() {
           <View style={{ paddingHorizontal: 20, gap: 20, marginTop: 16 }}>
 
             {/* ===== YOUR DAY ===== */}
-            {(moments.length > 0 || totalSeedLogs > 0) && (!isToday() || currentTime.getHours() >= 18) && (
+            {(moments.length > 0 || totalSeedLogs > 0) && (
               <TouchableOpacity
                 activeOpacity={0.85}
                 onPress={() => router.push({
@@ -601,7 +601,7 @@ export default function HomeScreen() {
               </View>
 
               {/* Seeds grid - 4 columns */}
-              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', rowGap: 10, columnGap: 8 }}>
                 {anchors.map((anchor) => {
                   const count = anchorLogs[anchor.id] ?? 0
                   const isGrow = anchor.type === 'grow'
@@ -613,7 +613,7 @@ export default function HomeScreen() {
                       onPress={() => logAnchor(anchor.id)}
                       activeOpacity={0.7}
                       style={{
-                        width: '23%',
+                        width: '22.5%',
                         aspectRatio: 1,
                         borderRadius: 16,
                         backgroundColor: isGrow ? '#ecfdf5' : '#fef3c7',
@@ -647,7 +647,7 @@ export default function HomeScreen() {
                 <TouchableOpacity
                   activeOpacity={0.7}
                   style={{
-                    width: '23%',
+                    width: '22.5%',
                     aspectRatio: 1,
                     borderRadius: 16,
                     borderWidth: 2,
