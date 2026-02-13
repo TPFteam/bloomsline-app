@@ -46,7 +46,6 @@ import {
   Meh,
   Frown,
   Angry,
-  History,
   Info,
   Calendar,
 } from 'lucide-react-native'
@@ -329,67 +328,68 @@ export default function RitualsScreen() {
               {memberRituals.map((mr, idx) => {
                 const completed = isCompletedToday(mr.ritual_id)
                 const theme = CATEGORY_THEMES[mr.ritual.category] || CATEGORY_THEMES.morning
-                const subtitleParts = [
-                  mr.planned_time || '',
-                  theme.label,
-                  mr.ritual.duration_suggestion ? `${mr.ritual.duration_suggestion}m` : '',
-                ].filter(Boolean)
+                const timeStr = mr.planned_time ? mr.planned_time.slice(0, 5) : ''
+                const durStr = mr.ritual.duration_suggestion ? `${mr.ritual.duration_suggestion}m` : ''
 
                 return (
                   <View key={mr.id}>
                     <View style={{
-                      flexDirection: 'row', alignItems: 'center', gap: 14,
-                      paddingHorizontal: 20, paddingVertical: 16,
+                      flexDirection: 'row', alignItems: 'center', gap: 10,
+                      paddingHorizontal: 16, paddingVertical: 14,
                     }}>
                       {/* Checkbox */}
                       <TouchableOpacity onPress={() => toggleRitual(mr.ritual_id)} style={{
-                        width: 30, height: 30, borderRadius: 15, borderWidth: 2,
+                        width: 26, height: 26, borderRadius: 13, borderWidth: 2,
                         borderColor: completed ? '#059669' : '#d4d4d4',
                         backgroundColor: completed ? '#059669' : 'transparent',
                         alignItems: 'center', justifyContent: 'center',
                       }}>
-                        {completed && <Check size={16} color="#fff" />}
+                        {completed && <Check size={14} color="#fff" />}
                       </TouchableOpacity>
 
                       {/* Icon */}
                       <View style={{
-                        width: 40, height: 40, borderRadius: 12, backgroundColor: theme.lightBg,
+                        width: 36, height: 36, borderRadius: 10, backgroundColor: theme.lightBg,
                         alignItems: 'center', justifyContent: 'center',
                       }}>
-                        {getRitualIcon(mr.ritual.icon, 20, theme.accent)}
+                        {getRitualIcon(mr.ritual.icon, 17, theme.accent)}
                       </View>
 
-                      {/* Name + subtitle */}
-                      <View style={{ flex: 1 }}>
+                      {/* Name + meta */}
+                      <View style={{ flex: 1, marginRight: 4 }}>
                         <Text style={{
-                          fontSize: 16, fontWeight: '600',
+                          fontSize: 15, fontWeight: '600',
                           color: completed ? '#a3a3a3' : '#171717',
                           textDecorationLine: completed ? 'line-through' : 'none',
-                        }}>
+                        }} numberOfLines={1}>
                           {mr.ritual.name}
                         </Text>
-                        <Text style={{ fontSize: 13, color: '#9ca3af', marginTop: 2 }}>
-                          {subtitleParts.join(' \u00B7 ')}
-                        </Text>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 3 }}>
+                          {timeStr ? (
+                            <Text style={{ fontSize: 12, color: '#9ca3af' }}>{timeStr}</Text>
+                          ) : null}
+                          {durStr ? (
+                            <View style={{ backgroundColor: '#f3f4f6', borderRadius: 6, paddingHorizontal: 6, paddingVertical: 1 }}>
+                              <Text style={{ fontSize: 11, color: '#6b7280', fontWeight: '500' }}>{durStr}</Text>
+                            </View>
+                          ) : null}
+                        </View>
                       </View>
 
                       {/* Go button */}
-                      {!completed && (
+                      {!completed ? (
                         <TouchableOpacity onPress={() => openFocusModal(mr)} style={{
-                          backgroundColor: '#fef3c7', borderRadius: 20,
-                          paddingHorizontal: 16, paddingVertical: 7,
+                          backgroundColor: '#fef3c7', borderRadius: 16,
+                          paddingHorizontal: 14, paddingVertical: 6,
                         }}>
-                          <Text style={{ color: '#92400e', fontSize: 14, fontWeight: '700' }}>Go</Text>
+                          <Text style={{ color: '#92400e', fontSize: 13, fontWeight: '700' }}>Go</Text>
                         </TouchableOpacity>
+                      ) : (
+                        <View style={{ width: 42 }} />
                       )}
-
-                      {/* History icon */}
-                      <TouchableOpacity style={{ padding: 4 }}>
-                        <History size={20} color="#d4d4d4" />
-                      </TouchableOpacity>
                     </View>
                     {idx < memberRituals.length - 1 && (
-                      <View style={{ height: 1, backgroundColor: '#f3f4f6', marginLeft: 20, marginRight: 20 }} />
+                      <View style={{ height: 1, backgroundColor: '#f3f4f6', marginLeft: 16, marginRight: 16 }} />
                     )}
                   </View>
                 )
