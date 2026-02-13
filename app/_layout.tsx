@@ -1,6 +1,6 @@
 import { useEffect } from 'react'
 import { useFonts } from 'expo-font'
-import { Slot, useRouter, useSegments } from 'expo-router'
+import { Stack, useRouter, useSegments } from 'expo-router'
 import * as SplashScreen from 'expo-splash-screen'
 import { StatusBar } from 'expo-status-bar'
 import { AuthProvider, useAuth } from '@/lib/auth-context'
@@ -18,15 +18,36 @@ function AuthGate() {
     if (loading) return
 
     const inAuthGroup = segments[0] === '(auth)'
+    const isCallback = segments[0] === 'auth'
 
-    if (!session && !inAuthGroup) {
+    if (!session && !inAuthGroup && !isCallback) {
       router.replace('/(auth)/sign-in')
     } else if (session && inAuthGroup) {
       router.replace('/(tabs)')
     }
   }, [session, loading, segments])
 
-  return <Slot />
+  return (
+    <Stack screenOptions={{ headerShown: false }}>
+      <Stack.Screen name="(tabs)" />
+      <Stack.Screen name="(auth)" />
+      <Stack.Screen name="auth/callback" />
+      <Stack.Screen
+        name="capture"
+        options={{
+          presentation: 'fullScreenModal',
+          animation: 'slide_from_bottom',
+        }}
+      />
+      <Stack.Screen
+        name="daily-story"
+        options={{
+          presentation: 'fullScreenModal',
+          animation: 'fade',
+        }}
+      />
+    </Stack>
+  )
 }
 
 export default function RootLayout() {

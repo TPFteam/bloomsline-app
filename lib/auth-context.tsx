@@ -1,6 +1,22 @@
 import { createContext, useContext, useEffect, useState } from 'react'
+import { Platform } from 'react-native'
 import { Session, User } from '@supabase/supabase-js'
+import * as WebBrowser from 'expo-web-browser'
+import Constants from 'expo-constants'
 import { supabase } from './supabase'
+
+function getRedirectUri(): string {
+  if (Platform.OS === 'web') {
+    return `${window.location.origin}/auth/callback`
+  }
+  // In Expo Go, use the exp:// scheme with the dev server address
+  const hostUri = Constants.expoConfig?.hostUri
+  if (hostUri) {
+    return `exp://${hostUri}/--/`
+  }
+  // Standalone / dev build — use the app scheme
+  return 'bloomsline://'
+}
 
 type AuthContextType = {
   session: Session | null
@@ -9,6 +25,8 @@ type AuthContextType = {
   loading: boolean
   signIn: (email: string, password: string) => Promise<{ error: any }>
   signUp: (email: string, password: string, fullName: string) => Promise<{ error: any }>
+  signInWithGoogle: () => Promise<{ error: any }>
+  signInWithAzure: () => Promise<{ error: any }>
   signOut: () => Promise<void>
 }
 
@@ -19,6 +37,8 @@ const AuthContext = createContext<AuthContextType>({
   loading: true,
   signIn: async () => ({ error: null }),
   signUp: async () => ({ error: null }),
+  signInWithGoogle: async () => ({ error: null }),
+  signInWithAzure: async () => ({ error: null }),
   signOut: async () => {},
 })
 
@@ -79,13 +99,82 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return { error }
   }
 
+  async function signInWithGoogle() {
+    try {
+      const redirectUrl = getRedirectUri()
+
+      const { data, error } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: {
+          redirectTo: redirectUrl,
+          queryParams: { access_type: 'offline', prompt: 'consent' },
+          skipBrowserRedirect: Platform.OS !== 'web',
+        },
+      })
+
+      if (error) return { error }
+
+      // On native, open the auth URL in a browser
+      if (Platform.OS !== 'web' && data?.url) {
+        const result = await WebBrowser.openAuthSessionAsync(data.url, redirectUrl)
+        if (result.type === 'success') {
+          const url = new URL(result.url)
+          const params = new URLSearchParams(url.hash.substring(1))
+          const accessToken = params.get('access_token')
+          const refreshToken = params.get('refresh_token')
+          if (accessToken && refreshToken) {
+            await supabase.auth.setSession({ access_token: accessToken, refresh_token: refreshToken })
+          }
+        }
+      }
+
+      return { error: null }
+    } catch (err) {
+      return { error: err }
+    }
+  }
+
+  async function signInWithAzure() {
+    try {
+      const redirectUrl = getRedirectUri()
+
+      const { data, error } = await supabase.auth.signInWithOAuth({
+        provider: 'azure',
+        options: {
+          redirectTo: redirectUrl,
+          scopes: 'openid profile email',
+          skipBrowserRedirect: Platform.OS !== 'web',
+        },
+      })
+
+      if (error) return { error }
+
+      if (Platform.OS !== 'web' && data?.url) {
+        const result = await WebBrowser.openAuthSessionAsync(data.url, redirectUrl)
+        if (result.type === 'success') {
+          const url = new URL(result.url)
+          const params = new URLSearchParams(url.hash.substring(1))
+          const accessToken = params.get('access_token')
+          const refreshToken = params.get('refresh_token')
+          if (accessToken && refreshToken) {
+            await supabase.auth.setSession({ access_token: accessToken, refresh_token: refreshToken })
+          }
+        }
+      }
+
+      return { error: null }
+    } catch (err) {
+      return { error: err }
+    }
+  }
+
   async function signOut() {
     await supabase.auth.signOut()
     setMember(null)
   }
 
   return (
-    <AuthContext.Provider value={{ session, user, member, loading, signIn, signUp, signOut }}>
+    <AuthContext.Provider value={{ session, user, member, loading, signIn, signUp, signInWithGoogle, signInWithAzure, signOut }}>
       {children}
     </AuthContext.Provider>
   )
