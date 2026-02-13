@@ -10,6 +10,7 @@ import {
   Pressable,
   TextInput,
   Alert,
+  Platform,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { LinearGradient } from 'expo-linear-gradient'
@@ -48,9 +49,17 @@ import {
   Angry,
   Info,
   Calendar,
+  History,
+  Clock,
+  ChevronLeft,
+  ChevronRight,
+  ArrowLeft,
+  Minus,
 } from 'lucide-react-native'
+import { useAuth } from '@/lib/auth-context'
 import { useRituals } from '@/lib/hooks/useRituals'
-import { type RitualCategory, type Ritual } from '@/lib/services/rituals'
+import { type RitualCategory, type Ritual, type RitualCompletion } from '@/lib/services/rituals'
+import { supabase } from '@/lib/supabase'
 
 // ============================================
 // CONSTANTS
@@ -119,15 +128,17 @@ function formatTimerDisplay(seconds: number): string {
 // ============================================
 
 export default function RitualsScreen() {
+  const { member } = useAuth()
   const {
     memberRituals, loading, refreshing,
     completedCount, totalCount, isCompletedToday,
     refresh, toggleRitual, completeRitual,
-    addRitual, createRitual,
+    addRitual, createRitual, removeRitual,
     getAvailableRituals, getCategoryProgress, getCategoryFromTime: getCatFromTime,
   } = useRituals()
 
   // UI State
+  const [viewCategory, setViewCategory] = useState<RitualCategory | null>(null)
   const [showAddModal, setShowAddModal] = useState(false)
   const [addingToCategory, setAddingToCategory] = useState<RitualCategory | null>(null)
   const [showCustomModal, setShowCustomModal] = useState(false)
@@ -144,6 +155,24 @@ export default function RitualsScreen() {
   const [currentPrompt, setCurrentPrompt] = useState('')
   const [saving, setSaving] = useState(false)
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // History modal
+  const [historyRitual, setHistoryRitual] = useState<typeof memberRituals[0] | null>(null)
+  const [ritualHistory, setRitualHistory] = useState<RitualCompletion[]>([])
+  const [loadingHistory, setLoadingHistory] = useState(false)
+
+  // Full history modal
+  const [showFullHistory, setShowFullHistory] = useState(false)
+  const [fullHistory, setFullHistory] = useState<(RitualCompletion & { ritual?: any })[]>([])
+  const [loadingFullHistory, setLoadingFullHistory] = useState(false)
+  const [historyFilter, setHistoryFilter] = useState<'day' | 'category' | 'all'>('day')
+  const [historyDate, setHistoryDate] = useState(() => {
+    const n = new Date()
+    return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, '0')}-${String(n.getDate()).padStart(2, '0')}`
+  })
+  const [historyCat, setHistoryCat] = useState<RitualCategory | 'all'>('all')
+  const [showChanges, setShowChanges] = useState(false)
+  const [ritualChanges, setRitualChanges] = useState<{ id: string; ritual_id: string; added_at: string | null; removed_at: string | null; is_active: boolean; ritual: any }[]>([])
 
   // Custom ritual form
   const [customName, setCustomName] = useState('')
@@ -183,14 +212,19 @@ export default function RitualsScreen() {
 
   function closeFocusModal() {
     if (timerRunning) {
-      Alert.alert('Timer running', 'Are you sure you want to leave?', [
-        { text: 'Stay', style: 'cancel' },
-        { text: 'Leave', style: 'destructive', onPress: () => {
-          setActiveRitual(null)
-          setTimerRunning(false)
-          if (timerRef.current) clearTimeout(timerRef.current)
-        }},
-      ])
+      const leave = () => {
+        setActiveRitual(null)
+        setTimerRunning(false)
+        if (timerRef.current) clearTimeout(timerRef.current)
+      }
+      if (Platform.OS === 'web') {
+        if (confirm('Timer is running. Are you sure you want to leave?')) leave()
+      } else {
+        Alert.alert('Timer running', 'Are you sure you want to leave?', [
+          { text: 'Stay', style: 'cancel' },
+          { text: 'Leave', style: 'destructive', onPress: leave },
+        ])
+      }
     } else {
       setActiveRitual(null)
       if (timerRef.current) clearTimeout(timerRef.current)
@@ -259,6 +293,103 @@ export default function RitualsScreen() {
     setShowCustomModal(false)
   }
 
+  async function openHistoryModal(mr: typeof memberRituals[0]) {
+    if (!member?.id) return
+    setHistoryRitual(mr)
+    setLoadingHistory(true)
+    setRitualHistory([])
+
+    const { data } = await supabase
+      .from('ritual_completions')
+      .select('*')
+      .eq('member_id', member.id)
+      .eq('ritual_id', mr.ritual_id)
+      .order('completion_date', { ascending: false })
+      .limit(30)
+
+    if (data) setRitualHistory(data as RitualCompletion[])
+    setLoadingHistory(false)
+  }
+
+  function formatHistoryDate(dateStr: string): string {
+    const date = new Date(dateStr + 'T00:00:00')
+    const today = new Date()
+    const yesterday = new Date()
+    yesterday.setDate(yesterday.getDate() - 1)
+    if (date.toDateString() === today.toDateString()) return 'Today'
+    if (date.toDateString() === yesterday.toDateString()) return 'Yesterday'
+    return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+  }
+
+  async function openFullHistory() {
+    if (!member?.id) return
+    setShowFullHistory(true)
+    setShowChanges(false)
+    setLoadingFullHistory(true)
+
+    const [completionsRes, changesRes] = await Promise.all([
+      supabase
+        .from('ritual_completions')
+        .select('*, ritual:rituals(*)')
+        .eq('member_id', member.id)
+        .order('completion_date', { ascending: false })
+        .limit(200),
+      supabase
+        .from('member_rituals')
+        .select('id, ritual_id, added_at, removed_at, is_active, ritual:rituals(*)')
+        .eq('member_id', member.id),
+    ])
+
+    if (completionsRes.data) setFullHistory(completionsRes.data as any[])
+    if (changesRes.data) {
+      setRitualChanges(changesRes.data.map((mr: any) => ({
+        ...mr,
+        ritual: Array.isArray(mr.ritual) ? mr.ritual[0] || null : mr.ritual,
+      })))
+    }
+    setLoadingFullHistory(false)
+  }
+
+  function getHistoryDates(): string[] {
+    return [...new Set(fullHistory.map(h => h.completion_date))].sort((a, b) => b.localeCompare(a))
+  }
+
+  function navigateHistoryDate(dir: 'prev' | 'next') {
+    const dates = getHistoryDates()
+    const idx = dates.indexOf(historyDate)
+    if (dir === 'prev' && idx < dates.length - 1) setHistoryDate(dates[idx + 1])
+    if (dir === 'next' && idx > 0) setHistoryDate(dates[idx - 1])
+  }
+
+  function getFilteredFullHistory() {
+    if (historyFilter === 'day') return fullHistory.filter(h => h.completion_date === historyDate)
+    if (historyFilter === 'category' && historyCat !== 'all') return fullHistory.filter(h => h.ritual?.category === historyCat)
+    return fullHistory
+  }
+
+  function getChangesTimeline() {
+    const changes: { type: 'added' | 'removed'; date: string; ritual: typeof ritualChanges[0] }[] = []
+    ritualChanges.forEach(mr => {
+      if (mr.added_at) {
+        changes.push({ type: 'added', date: new Date(mr.added_at).toISOString().split('T')[0], ritual: mr })
+      }
+      if (mr.removed_at) {
+        changes.push({ type: 'removed', date: new Date(mr.removed_at).toISOString().split('T')[0], ritual: mr })
+      }
+    })
+    return changes.sort((a, b) => b.date.localeCompare(a.date))
+  }
+
+  function getGroupedChanges() {
+    const timeline = getChangesTimeline()
+    const grouped: Record<string, typeof timeline> = {}
+    timeline.forEach(c => {
+      if (!grouped[c.date]) grouped[c.date] = []
+      grouped[c.date].push(c)
+    })
+    return grouped
+  }
+
   // ============================================
   // LOADING STATE
   // ============================================
@@ -290,7 +421,7 @@ export default function RitualsScreen() {
             <TouchableOpacity style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: '#fff', alignItems: 'center', justifyContent: 'center', shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.04, shadowRadius: 2 }}>
               <Info size={18} color="#9ca3af" />
             </TouchableOpacity>
-            <TouchableOpacity style={{ flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#fff', borderRadius: 18, paddingHorizontal: 12, paddingVertical: 8, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.04, shadowRadius: 2 }}>
+            <TouchableOpacity onPress={openFullHistory} style={{ flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#fff', borderRadius: 18, paddingHorizontal: 12, paddingVertical: 8, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.04, shadowRadius: 2 }}>
               <Calendar size={16} color="#6b7280" />
               <Text style={{ fontSize: 14, fontWeight: '600', color: '#374151' }}>History</Text>
             </TouchableOpacity>
@@ -376,17 +507,20 @@ export default function RitualsScreen() {
                         </View>
                       </View>
 
-                      {/* Go button */}
-                      {!completed ? (
-                        <TouchableOpacity onPress={() => openFocusModal(mr)} style={{
-                          backgroundColor: '#fef3c7', borderRadius: 16,
-                          paddingHorizontal: 14, paddingVertical: 6,
-                        }}>
-                          <Text style={{ color: '#92400e', fontSize: 13, fontWeight: '700' }}>Go</Text>
+                      {/* Go button + History */}
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                        {!completed ? (
+                          <TouchableOpacity onPress={() => openFocusModal(mr)} style={{
+                            backgroundColor: '#fef3c7', borderRadius: 16,
+                            paddingHorizontal: 14, paddingVertical: 6,
+                          }}>
+                            <Text style={{ color: '#92400e', fontSize: 13, fontWeight: '700' }}>Go</Text>
+                          </TouchableOpacity>
+                        ) : null}
+                        <TouchableOpacity onPress={() => openHistoryModal(mr)} style={{ padding: 4 }}>
+                          <History size={16} color="#d1d5db" />
                         </TouchableOpacity>
-                      ) : (
-                        <View style={{ width: 42 }} />
-                      )}
+                      </View>
                     </View>
                     {idx < memberRituals.length - 1 && (
                       <View style={{ height: 1, backgroundColor: '#f3f4f6', marginLeft: 16, marginRight: 16 }} />
@@ -420,7 +554,7 @@ export default function RitualsScreen() {
             return (
               <TouchableOpacity
                 key={cat}
-                onPress={() => openAddModal(cat)}
+                onPress={() => setViewCategory(cat)}
                 activeOpacity={0.7}
                 style={{
                   flex: 1, backgroundColor: theme.bg, borderRadius: 16, padding: 14,
@@ -444,6 +578,148 @@ export default function RitualsScreen() {
           })}
         </View>
       </ScrollView>
+
+      {/* ============================================ */}
+      {/* CATEGORY DETAIL MODAL */}
+      {/* ============================================ */}
+      <Modal visible={!!viewCategory} transparent animationType="slide" onRequestClose={() => setViewCategory(null)}>
+        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'flex-end' }} onPress={() => setViewCategory(null)}>
+          <Pressable style={{
+            backgroundColor: '#fff', borderTopLeftRadius: 24, borderTopRightRadius: 24,
+            padding: 24, maxHeight: '75%',
+          }} onPress={() => {}}>
+            {viewCategory && (() => {
+              const theme = CATEGORY_THEMES[viewCategory]
+              const ThemeIcon = theme.icon
+              const catRituals = memberRituals.filter(mr => mr.ritual.category === viewCategory)
+
+              return (
+                <>
+                  {/* Header */}
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                      <View style={{
+                        width: 36, height: 36, borderRadius: 10, backgroundColor: theme.lightBg,
+                        alignItems: 'center', justifyContent: 'center',
+                      }}>
+                        <ThemeIcon size={18} color={theme.accent} />
+                      </View>
+                      <Text style={{ fontSize: 18, fontWeight: '700', color: '#171717' }}>{theme.label}</Text>
+                    </View>
+                    <TouchableOpacity onPress={() => setViewCategory(null)}>
+                      <X size={22} color="#9ca3af" />
+                    </TouchableOpacity>
+                  </View>
+
+                  <ScrollView style={{ maxHeight: 400 }} showsVerticalScrollIndicator={false}>
+                    {/* Existing rituals */}
+                    {catRituals.length === 0 ? (
+                      <View style={{ backgroundColor: '#f9fafb', borderRadius: 14, padding: 20, alignItems: 'center', marginBottom: 12 }}>
+                        <Text style={{ fontSize: 14, color: '#9ca3af' }}>No rituals added yet</Text>
+                      </View>
+                    ) : (
+                      <View style={{ gap: 8, marginBottom: 12 }}>
+                        {catRituals.map((mr) => {
+                          const completed = isCompletedToday(mr.ritual_id)
+                          return (
+                            <View key={mr.id} style={{
+                              flexDirection: 'row', alignItems: 'center', gap: 10,
+                              backgroundColor: completed ? '#f0fdf4' : '#f9fafb',
+                              borderRadius: 14, padding: 12,
+                              borderWidth: 1, borderColor: completed ? '#bbf7d0' : '#f3f4f6',
+                            }}>
+                              {/* Checkbox/icon */}
+                              <TouchableOpacity
+                                onPress={() => toggleRitual(mr.ritual_id)}
+                                style={{
+                                  width: 32, height: 32, borderRadius: 8,
+                                  backgroundColor: completed ? '#dcfce7' : theme.lightBg,
+                                  alignItems: 'center', justifyContent: 'center',
+                                }}
+                              >
+                                {completed ? (
+                                  <Check size={16} color="#059669" />
+                                ) : (
+                                  getRitualIcon(mr.ritual.icon, 16, theme.accent)
+                                )}
+                              </TouchableOpacity>
+
+                              {/* Name + description */}
+                              <View style={{ flex: 1 }}>
+                                <Text style={{
+                                  fontSize: 14, fontWeight: '600',
+                                  color: completed ? '#9ca3af' : '#171717',
+                                  textDecorationLine: completed ? 'line-through' : 'none',
+                                }} numberOfLines={1}>
+                                  {mr.ritual.name}
+                                </Text>
+                                {mr.ritual.description && (
+                                  <Text style={{ fontSize: 12, color: '#9ca3af', marginTop: 1 }} numberOfLines={1}>
+                                    {mr.ritual.description}
+                                  </Text>
+                                )}
+                              </View>
+
+                              {/* Start button */}
+                              {!completed && (
+                                <TouchableOpacity onPress={() => {
+                                  setViewCategory(null)
+                                  openFocusModal(mr)
+                                }} style={{
+                                  backgroundColor: theme.lightBg, borderRadius: 8,
+                                  paddingHorizontal: 10, paddingVertical: 5,
+                                }}>
+                                  <Text style={{ fontSize: 12, fontWeight: '600', color: theme.accent }}>Start</Text>
+                                </TouchableOpacity>
+                              )}
+
+                              {/* Remove button */}
+                              <TouchableOpacity
+                                onPress={() => {
+                                  if (Platform.OS === 'web') {
+                                    if (confirm(`Remove "${mr.ritual.name}" from your list?`)) {
+                                      removeRitual(mr.id)
+                                    }
+                                  } else {
+                                    Alert.alert('Remove ritual', `Remove "${mr.ritual.name}" from your list?`, [
+                                      { text: 'Cancel', style: 'cancel' },
+                                      { text: 'Remove', style: 'destructive', onPress: () => removeRitual(mr.id) },
+                                    ])
+                                  }
+                                }}
+                                style={{ padding: 4 }}
+                              >
+                                <X size={16} color="#d1d5db" />
+                              </TouchableOpacity>
+                            </View>
+                          )
+                        })}
+                      </View>
+                    )}
+
+                    {/* Add ritual button */}
+                    <TouchableOpacity
+                      onPress={() => {
+                        setViewCategory(null)
+                        openAddModal(viewCategory)
+                      }}
+                      style={{
+                        flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+                        gap: 8, paddingVertical: 14, borderRadius: 14,
+                        borderWidth: 1.5, borderColor: '#e5e7eb', borderStyle: 'dashed',
+                        backgroundColor: '#f9fafb',
+                      }}
+                    >
+                      <Plus size={18} color="#6b7280" />
+                      <Text style={{ fontSize: 14, fontWeight: '600', color: '#6b7280' }}>Add ritual</Text>
+                    </TouchableOpacity>
+                  </ScrollView>
+                </>
+              )
+            })()}
+          </Pressable>
+        </Pressable>
+      </Modal>
 
       {/* ============================================ */}
       {/* ADD RITUAL MODAL */}
@@ -897,6 +1173,505 @@ export default function RitualsScreen() {
           )
         })()}
       </Modal>
+
+      {/* ============================================ */}
+      {/* HISTORY MODAL */}
+      {/* ============================================ */}
+      <Modal visible={!!historyRitual} transparent animationType="slide" onRequestClose={() => setHistoryRitual(null)}>
+        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'flex-end' }} onPress={() => setHistoryRitual(null)}>
+          <Pressable style={{
+            backgroundColor: '#fff', borderTopLeftRadius: 24, borderTopRightRadius: 24,
+            maxHeight: '80%',
+          }} onPress={() => {}}>
+            {historyRitual && (() => {
+              const theme = CATEGORY_THEMES[historyRitual.ritual.category] || CATEGORY_THEMES.morning
+
+              return (
+                <>
+                  {/* Header */}
+                  <View style={{
+                    flexDirection: 'row', alignItems: 'center', gap: 12,
+                    paddingHorizontal: 20, paddingTop: 20, paddingBottom: 14,
+                    borderBottomWidth: 1, borderBottomColor: '#f3f4f6',
+                  }}>
+                    <View style={{
+                      width: 40, height: 40, borderRadius: 10, backgroundColor: theme.lightBg,
+                      alignItems: 'center', justifyContent: 'center',
+                    }}>
+                      {getRitualIcon(historyRitual.ritual.icon, 20, theme.accent)}
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ fontSize: 16, fontWeight: '700', color: '#171717' }}>{historyRitual.ritual.name}</Text>
+                      <Text style={{ fontSize: 12, color: '#9ca3af' }}>History</Text>
+                    </View>
+                    <TouchableOpacity onPress={() => setHistoryRitual(null)}>
+                      <X size={22} color="#9ca3af" />
+                    </TouchableOpacity>
+                  </View>
+
+                  {/* Content */}
+                  <ScrollView style={{ maxHeight: 400 }} contentContainerStyle={{ padding: 16 }}>
+                    {loadingHistory ? (
+                      <View style={{ alignItems: 'center', paddingVertical: 32 }}>
+                        <ActivityIndicator size="small" color="#059669" />
+                      </View>
+                    ) : ritualHistory.length === 0 ? (
+                      <View style={{ alignItems: 'center', paddingVertical: 32 }}>
+                        <View style={{
+                          width: 48, height: 48, borderRadius: 24, backgroundColor: '#f3f4f6',
+                          alignItems: 'center', justifyContent: 'center', marginBottom: 8,
+                        }}>
+                          <Calendar size={24} color="#d1d5db" />
+                        </View>
+                        <Text style={{ fontSize: 14, color: '#9ca3af' }}>No completions yet</Text>
+                      </View>
+                    ) : (
+                      <View style={{ gap: 10 }}>
+                        {ritualHistory.map((completion) => {
+                          const moodOpt = MOOD_OPTIONS.find(m => m.value === completion.mood)
+                          return (
+                            <View key={completion.id} style={{
+                              backgroundColor: '#f9fafb', borderRadius: 14, padding: 14,
+                              opacity: completion.completed ? 1 : 0.5,
+                            }}>
+                              <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: completion.notes ? 8 : 0 }}>
+                                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                                  <Calendar size={14} color="#9ca3af" />
+                                  <Text style={{ fontSize: 14, fontWeight: '600', color: '#171717' }}>
+                                    {formatHistoryDate(completion.completion_date)}
+                                  </Text>
+                                </View>
+                                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                                  {moodOpt && (
+                                    <View style={{
+                                      flexDirection: 'row', alignItems: 'center', gap: 3,
+                                      backgroundColor: moodOpt.bg, borderRadius: 10,
+                                      paddingHorizontal: 8, paddingVertical: 3,
+                                    }}>
+                                      <moodOpt.icon size={12} color={moodOpt.color} />
+                                      <Text style={{ fontSize: 11, fontWeight: '500', color: moodOpt.color }}>{moodOpt.label}</Text>
+                                    </View>
+                                  )}
+                                  {completion.duration_minutes ? (
+                                    <View style={{
+                                      flexDirection: 'row', alignItems: 'center', gap: 3,
+                                      backgroundColor: '#ecfdf5', borderRadius: 10,
+                                      paddingHorizontal: 8, paddingVertical: 3,
+                                    }}>
+                                      <Clock size={12} color="#059669" />
+                                      <Text style={{ fontSize: 11, fontWeight: '500', color: '#059669' }}>{completion.duration_minutes}m</Text>
+                                    </View>
+                                  ) : null}
+                                  {completion.completed ? (
+                                    <View style={{
+                                      width: 20, height: 20, borderRadius: 10,
+                                      backgroundColor: '#ecfdf5', alignItems: 'center', justifyContent: 'center',
+                                    }}>
+                                      <Check size={12} color="#059669" />
+                                    </View>
+                                  ) : null}
+                                </View>
+                              </View>
+                              {completion.notes ? (
+                                <Text style={{ fontSize: 13, color: '#6b7280', marginTop: 4 }}>{completion.notes}</Text>
+                              ) : null}
+                            </View>
+                          )
+                        })}
+                      </View>
+                    )}
+                  </ScrollView>
+
+                  {/* Stats footer */}
+                  {ritualHistory.length > 0 && (
+                    <View style={{
+                      flexDirection: 'row', justifyContent: 'space-around',
+                      paddingVertical: 16, paddingHorizontal: 20,
+                      borderTopWidth: 1, borderTopColor: '#f3f4f6', backgroundColor: '#f9fafb',
+                      borderBottomLeftRadius: 24, borderBottomRightRadius: 24,
+                    }}>
+                      <View style={{ alignItems: 'center' }}>
+                        <Text style={{ fontSize: 20, fontWeight: '700', color: '#171717' }}>
+                          {ritualHistory.filter(h => h.completed).length}
+                        </Text>
+                        <Text style={{ fontSize: 11, color: '#9ca3af' }}>Completed</Text>
+                      </View>
+                      <View style={{ alignItems: 'center' }}>
+                        <Text style={{ fontSize: 20, fontWeight: '700', color: '#171717' }}>
+                          {ritualHistory.filter(h => h.duration_minutes).length > 0
+                            ? Math.round(
+                                ritualHistory.filter(h => h.duration_minutes).reduce((acc, h) => acc + (h.duration_minutes || 0), 0) /
+                                ritualHistory.filter(h => h.duration_minutes).length
+                              )
+                            : '-'}
+                        </Text>
+                        <Text style={{ fontSize: 11, color: '#9ca3af' }}>Avg mins</Text>
+                      </View>
+                      <View style={{ alignItems: 'center' }}>
+                        <Text style={{ fontSize: 20, fontWeight: '700', color: '#171717' }}>
+                          {ritualHistory.filter(h => h.notes).length}
+                        </Text>
+                        <Text style={{ fontSize: 11, color: '#9ca3af' }}>Notes</Text>
+                      </View>
+                    </View>
+                  )}
+                </>
+              )
+            })()}
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      {/* ============================================ */}
+      {/* FULL HISTORY MODAL */}
+      {/* ============================================ */}
+      <Modal visible={showFullHistory} animationType="slide" onRequestClose={() => setShowFullHistory(false)}>
+        <SafeAreaView style={{ flex: 1, backgroundColor: '#f9fafb' }} edges={['top']}>
+          {/* Header */}
+          <View style={{
+            flexDirection: 'row', alignItems: 'center', gap: 12,
+            paddingHorizontal: 20, paddingVertical: 14,
+            backgroundColor: '#fff', borderBottomWidth: 1, borderBottomColor: '#f3f4f6',
+          }}>
+            <TouchableOpacity onPress={() => setShowFullHistory(false)} style={{ padding: 4 }}>
+              <ArrowLeft size={22} color="#374151" />
+            </TouchableOpacity>
+            <View style={{ flex: 1 }}>
+              <Text style={{ fontSize: 18, fontWeight: '700', color: '#171717' }}>History</Text>
+              <Text style={{ fontSize: 12, color: '#9ca3af' }}>
+                {showChanges
+                  ? `${getChangesTimeline().length} changes`
+                  : `${fullHistory.length} rituals completed`}
+              </Text>
+            </View>
+            <TouchableOpacity
+              onPress={() => setShowChanges(!showChanges)}
+              style={{
+                flexDirection: 'row', alignItems: 'center', gap: 5,
+                backgroundColor: showChanges ? '#ecfdf5' : '#f3f4f6',
+                borderRadius: 10, paddingHorizontal: 12, paddingVertical: 7,
+                borderWidth: 1, borderColor: showChanges ? '#059669' : '#e5e7eb',
+              }}
+            >
+              <RefreshCw size={14} color={showChanges ? '#059669' : '#6b7280'} />
+              <Text style={{ fontSize: 13, fontWeight: '600', color: showChanges ? '#059669' : '#6b7280' }}>Changes</Text>
+            </TouchableOpacity>
+          </View>
+
+          {/* Filter Tabs (hidden when showing changes) */}
+          {!showChanges && (
+          <View style={{
+            flexDirection: 'row', gap: 4, margin: 16,
+            backgroundColor: '#f3f4f6', borderRadius: 12, padding: 4,
+          }}>
+            {(['day', 'category', 'all'] as const).map(f => (
+              <TouchableOpacity key={f} onPress={() => setHistoryFilter(f)} style={{
+                flex: 1, paddingVertical: 8, borderRadius: 10, alignItems: 'center',
+                backgroundColor: historyFilter === f ? '#fff' : 'transparent',
+                ...(historyFilter === f ? { shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.05, shadowRadius: 2, elevation: 1 } : {}),
+              }}>
+                <Text style={{
+                  fontSize: 13, fontWeight: '600',
+                  color: historyFilter === f ? '#171717' : '#9ca3af',
+                }}>
+                  {f === 'day' ? 'By Day' : f === 'category' ? 'By Theme' : 'All'}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+          )}
+
+          {/* Date Navigator (for day filter) */}
+          {!showChanges && historyFilter === 'day' && getHistoryDates().length > 0 && (
+            <View style={{
+              flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+              marginHorizontal: 16, marginBottom: 12, backgroundColor: '#fff',
+              borderRadius: 14, padding: 12, borderWidth: 1, borderColor: '#f3f4f6',
+            }}>
+              <TouchableOpacity
+                onPress={() => navigateHistoryDate('prev')}
+                disabled={getHistoryDates().indexOf(historyDate) === getHistoryDates().length - 1}
+                style={{ padding: 6, opacity: getHistoryDates().indexOf(historyDate) === getHistoryDates().length - 1 ? 0.3 : 1 }}
+              >
+                <ChevronLeft size={20} color="#374151" />
+              </TouchableOpacity>
+              <View style={{ alignItems: 'center' }}>
+                <Text style={{ fontSize: 15, fontWeight: '600', color: '#171717' }}>
+                  {formatHistoryDate(historyDate)}
+                </Text>
+                <Text style={{ fontSize: 12, color: '#9ca3af' }}>
+                  {fullHistory.filter(h => h.completion_date === historyDate).length} completed
+                </Text>
+              </View>
+              <TouchableOpacity
+                onPress={() => navigateHistoryDate('next')}
+                disabled={getHistoryDates().indexOf(historyDate) === 0}
+                style={{ padding: 6, opacity: getHistoryDates().indexOf(historyDate) === 0 ? 0.3 : 1 }}
+              >
+                <ChevronRight size={20} color="#374151" />
+              </TouchableOpacity>
+            </View>
+          )}
+
+          {/* Category Filter (for category filter) */}
+          {!showChanges && historyFilter === 'category' && (
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, paddingHorizontal: 16, marginBottom: 12 }}>
+              <TouchableOpacity onPress={() => setHistoryCat('all')} style={{
+                paddingHorizontal: 16, paddingVertical: 8, borderRadius: 12,
+                backgroundColor: historyCat === 'all' ? '#171717' : '#fff',
+                borderWidth: 1, borderColor: historyCat === 'all' ? '#171717' : '#e5e7eb',
+              }}>
+                <Text style={{ fontSize: 13, fontWeight: '600', color: historyCat === 'all' ? '#fff' : '#6b7280' }}>All</Text>
+              </TouchableOpacity>
+              {categories.map(cat => {
+                const t = CATEGORY_THEMES[cat]
+                const CI = t.icon
+                return (
+                  <TouchableOpacity key={cat} onPress={() => setHistoryCat(cat)} style={{
+                    flexDirection: 'row', alignItems: 'center', gap: 6,
+                    paddingHorizontal: 14, paddingVertical: 8, borderRadius: 12,
+                    backgroundColor: historyCat === cat ? t.bg : '#fff',
+                    borderWidth: 1, borderColor: historyCat === cat ? t.accent : '#e5e7eb',
+                  }}>
+                    <CI size={14} color={historyCat === cat ? t.accent : '#9ca3af'} />
+                    <Text style={{ fontSize: 13, fontWeight: '600', color: historyCat === cat ? t.accent : '#6b7280' }}>{t.label}</Text>
+                  </TouchableOpacity>
+                )
+              })}
+            </View>
+          )}
+
+          {/* Changes Timeline */}
+          {showChanges ? (
+            <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 40 }}>
+              {loadingFullHistory ? (
+                <View style={{ alignItems: 'center', paddingVertical: 40 }}>
+                  <ActivityIndicator size="large" color="#059669" />
+                </View>
+              ) : getChangesTimeline().length === 0 ? (
+                <View style={{ alignItems: 'center', paddingVertical: 40 }}>
+                  <View style={{ width: 56, height: 56, borderRadius: 16, backgroundColor: '#f3f4f6', alignItems: 'center', justifyContent: 'center', marginBottom: 12 }}>
+                    <RefreshCw size={28} color="#d1d5db" />
+                  </View>
+                  <Text style={{ fontSize: 15, fontWeight: '600', color: '#171717', marginBottom: 4 }}>No changes yet</Text>
+                  <Text style={{ fontSize: 13, color: '#9ca3af' }}>Add or remove rituals to see changes</Text>
+                </View>
+              ) : (
+                <View style={{ gap: 20 }}>
+                  {Object.entries(getGroupedChanges()).map(([date, changes]) => (
+                    <View key={date}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                        <Text style={{ fontSize: 14, fontWeight: '600', color: '#171717' }}>{formatHistoryDate(date)}</Text>
+                        <Text style={{ fontSize: 12, color: '#9ca3af' }}>{changes.length} {changes.length === 1 ? 'change' : 'changes'}</Text>
+                      </View>
+                      <View style={{ gap: 8 }}>
+                        {changes.map((change, i) => {
+                          const isAdded = change.type === 'added'
+                          const ritual = change.ritual.ritual
+                          const cat = ritual?.category as RitualCategory | undefined
+                          const catTheme = cat ? CATEGORY_THEMES[cat] : null
+
+                          return (
+                            <View key={`${change.ritual.id}-${change.type}-${i}`} style={{
+                              backgroundColor: '#fff', borderRadius: 14, padding: 14,
+                              borderWidth: 1, borderColor: '#f3f4f6',
+                            }}>
+                              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                                {/* Added/Removed icon */}
+                                <View style={{
+                                  width: 36, height: 36, borderRadius: 10,
+                                  backgroundColor: isAdded ? '#ecfdf5' : '#fef2f2',
+                                  alignItems: 'center', justifyContent: 'center',
+                                }}>
+                                  {isAdded
+                                    ? <Plus size={17} color="#059669" />
+                                    : <Minus size={17} color="#ef4444" />
+                                  }
+                                </View>
+
+                                {/* Ritual info */}
+                                <View style={{ flex: 1 }}>
+                                  <Text style={{ fontSize: 14, fontWeight: '600', color: '#171717' }}>
+                                    {ritual?.name || 'Unknown ritual'}
+                                  </Text>
+                                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 4 }}>
+                                    {/* Added/Removed badge */}
+                                    <View style={{
+                                      backgroundColor: isAdded ? '#ecfdf5' : '#fef2f2',
+                                      borderRadius: 8, paddingHorizontal: 8, paddingVertical: 2,
+                                    }}>
+                                      <Text style={{
+                                        fontSize: 11, fontWeight: '600',
+                                        color: isAdded ? '#059669' : '#ef4444',
+                                      }}>
+                                        {isAdded ? 'Added' : 'Removed'}
+                                      </Text>
+                                    </View>
+                                    {/* Category label */}
+                                    {catTheme && (
+                                      <View style={{
+                                        flexDirection: 'row', alignItems: 'center', gap: 3,
+                                        backgroundColor: catTheme.lightBg, borderRadius: 8,
+                                        paddingHorizontal: 7, paddingVertical: 2,
+                                      }}>
+                                        {getRitualIcon(ritual?.icon, 11, catTheme.accent)}
+                                        <Text style={{ fontSize: 11, fontWeight: '500', color: catTheme.accent }}>
+                                          {catTheme.label}
+                                        </Text>
+                                      </View>
+                                    )}
+                                  </View>
+                                </View>
+                              </View>
+                            </View>
+                          )
+                        })}
+                      </View>
+                    </View>
+                  ))}
+                </View>
+              )}
+            </ScrollView>
+          ) : (
+
+          /* Completions Content */
+          <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 40 }}>
+            {loadingFullHistory ? (
+              <View style={{ alignItems: 'center', paddingVertical: 40 }}>
+                <ActivityIndicator size="large" color="#059669" />
+              </View>
+            ) : fullHistory.length === 0 ? (
+              <View style={{ alignItems: 'center', paddingVertical: 40 }}>
+                <View style={{ width: 56, height: 56, borderRadius: 16, backgroundColor: '#f3f4f6', alignItems: 'center', justifyContent: 'center', marginBottom: 12 }}>
+                  <Calendar size={28} color="#d1d5db" />
+                </View>
+                <Text style={{ fontSize: 15, fontWeight: '600', color: '#171717', marginBottom: 4 }}>No history yet</Text>
+                <Text style={{ fontSize: 13, color: '#9ca3af' }}>Complete rituals to see your journey</Text>
+              </View>
+            ) : (() => {
+              const filtered = getFilteredFullHistory()
+
+              if (filtered.length === 0) {
+                return (
+                  <View style={{ alignItems: 'center', paddingVertical: 32 }}>
+                    <Calendar size={24} color="#d1d5db" />
+                    <Text style={{ fontSize: 14, color: '#9ca3af', marginTop: 8 }}>
+                      {historyFilter === 'day' ? 'No rituals this day' : 'No rituals in this category'}
+                    </Text>
+                  </View>
+                )
+              }
+
+              // Group by date for 'all' filter
+              if (historyFilter === 'all' || historyFilter === 'category') {
+                const grouped: Record<string, typeof filtered> = {}
+                filtered.forEach(h => {
+                  if (!grouped[h.completion_date]) grouped[h.completion_date] = []
+                  grouped[h.completion_date].push(h)
+                })
+
+                return (
+                  <View style={{ gap: 20 }}>
+                    {Object.entries(grouped).map(([date, completions]) => (
+                      <View key={date}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                          <Text style={{ fontSize: 14, fontWeight: '600', color: '#171717' }}>{formatHistoryDate(date)}</Text>
+                          <Text style={{ fontSize: 12, color: '#9ca3af' }}>{completions.length} completed</Text>
+                        </View>
+                        <View style={{ gap: 8 }}>
+                          {completions.map(c => (
+                            <HistoryCard key={c.id} completion={c} />
+                          ))}
+                        </View>
+                      </View>
+                    ))}
+                  </View>
+                )
+              }
+
+              // Day view
+              return (
+                <View style={{ gap: 8 }}>
+                  {filtered.map(c => (
+                    <HistoryCard key={c.id} completion={c} />
+                  ))}
+                </View>
+              )
+            })()}
+          </ScrollView>
+          )}
+        </SafeAreaView>
+      </Modal>
     </SafeAreaView>
+  )
+}
+
+// ============================================
+// HISTORY CARD COMPONENT
+// ============================================
+function HistoryCard({ completion }: { completion: RitualCompletion & { ritual?: any } }) {
+  const cat = completion.ritual?.category
+  const catTheme = cat ? {
+    morning: { accent: '#f59e0b', bg: '#fef3c7' },
+    midday: { accent: '#059669', bg: '#d1fae5' },
+    evening: { accent: '#6366f1', bg: '#e0e7ff' },
+    selfcare: { accent: '#ec4899', bg: '#fce7f3' },
+  }[cat as string] : null
+  const moodOpt = [
+    { value: 'great', label: 'Great', color: '#059669', bg: '#ecfdf5' },
+    { value: 'good', label: 'Good', color: '#22c55e', bg: '#f0fdf4' },
+    { value: 'okay', label: 'Okay', color: '#eab308', bg: '#fefce8' },
+    { value: 'low', label: 'Low', color: '#f97316', bg: '#fff7ed' },
+    { value: 'difficult', label: 'Difficult', color: '#ef4444', bg: '#fef2f2' },
+  ].find(m => m.value === completion.mood)
+
+  const iconMap: Record<string, React.ComponentType<{ size?: number; color?: string }>> = {
+    'eye': Eye, 'coffee': Coffee, 'sprout': Sprout, 'sun': Sun,
+    'moon': Moon, 'heart': Heart, 'music': Music, 'cloud': Cloud,
+    'stars': Stars, 'smile': Smile, 'shield': Shield, 'gift': Gift,
+    'hand': Hand, 'sofa': Sofa, 'mail': Mail,
+  }
+  const IconComp = iconMap[completion.ritual?.icon || ''] || Heart
+
+  return (
+    <View style={{
+      backgroundColor: '#fff', borderRadius: 14, padding: 14,
+      borderWidth: 1, borderColor: '#f3f4f6',
+    }}>
+      <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 10 }}>
+        <View style={{
+          width: 36, height: 36, borderRadius: 10,
+          backgroundColor: catTheme?.bg || '#f3f4f6',
+          alignItems: 'center', justifyContent: 'center',
+        }}>
+          <IconComp size={17} color={catTheme?.accent || '#9ca3af'} />
+        </View>
+        <View style={{ flex: 1 }}>
+          <Text style={{ fontSize: 14, fontWeight: '600', color: '#171717' }}>
+            {completion.ritual?.name || 'Unknown ritual'}
+          </Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 4, flexWrap: 'wrap' }}>
+            {moodOpt && (
+              <View style={{ backgroundColor: moodOpt.bg, borderRadius: 8, paddingHorizontal: 8, paddingVertical: 2 }}>
+                <Text style={{ fontSize: 11, fontWeight: '500', color: moodOpt.color }}>{moodOpt.label}</Text>
+              </View>
+            )}
+            {completion.duration_minutes ? (
+              <Text style={{ fontSize: 11, color: '#9ca3af' }}>{completion.duration_minutes}m</Text>
+            ) : null}
+            {completion.completed && (
+              <View style={{ width: 16, height: 16, borderRadius: 8, backgroundColor: '#ecfdf5', alignItems: 'center', justifyContent: 'center' }}>
+                <Check size={10} color="#059669" />
+              </View>
+            )}
+          </View>
+          {completion.notes ? (
+            <View style={{ backgroundColor: '#f9fafb', borderRadius: 8, padding: 10, marginTop: 8 }}>
+              <Text style={{ fontSize: 13, color: '#6b7280', fontStyle: 'italic' }}>"{completion.notes}"</Text>
+            </View>
+          ) : null}
+        </View>
+      </View>
+    </View>
   )
 }
