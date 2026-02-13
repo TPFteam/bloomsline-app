@@ -2097,33 +2097,34 @@ export default function PractitionerScreen() {
                 shadowColor: '#000', shadowOffset: { width: 0, height: -4 }, shadowOpacity: 0.06, shadowRadius: 8,
               }}>
                 {(() => {
-                  const hasInteractiveBlocks = (fillResource.blocks || []).some((b: any) =>
-                    ['prompt', 'multiple_choice', 'yes_no', 'checklist', 'scale', 'likert',
-                      'mood', 'slider', 'numeric', 'date_picker', 'time_input', 'list_input',
-                      'matrix_rating', 'table_exercise'].includes(b.type)
-                  )
+                  const resType = fillResource?.type || activeResourceItem?.resourceType || ''
+                  const isSubmittable = ['worksheet', 'exercise', 'table', 'assessment'].includes(resType)
 
-                  if (activeResourceItem?.type === 'assignment' && hasInteractiveBlocks) {
+                  if (isSubmittable) {
+                    const canSaveDraft = activeResourceItem?.type === 'assignment' && !!draftResponseId
                     return (
                       <View style={{ flexDirection: 'row', gap: 12 }}>
+                        {canSaveDraft && (
+                          <TouchableOpacity
+                            onPress={handleSaveDraft}
+                            disabled={saving}
+                            style={{
+                              flex: 1, paddingVertical: 14, alignItems: 'center', borderRadius: 14,
+                              backgroundColor: '#f3f4f6',
+                              opacity: saving ? 0.5 : 1,
+                            }}
+                          >
+                            <Text style={{ fontSize: 15, fontWeight: '600', color: '#374151' }}>
+                              {saving ? 'Saving...' : 'Save Draft'}
+                            </Text>
+                          </TouchableOpacity>
+                        )}
                         <TouchableOpacity
-                          onPress={handleSaveDraft}
-                          disabled={saving || !draftResponseId}
-                          style={{
-                            flex: 1, paddingVertical: 14, alignItems: 'center', borderRadius: 14,
-                            backgroundColor: '#f3f4f6',
-                            opacity: saving || !draftResponseId ? 0.5 : 1,
-                          }}
-                        >
-                          <Text style={{ fontSize: 15, fontWeight: '600', color: '#374151' }}>
-                            {saving ? 'Saving...' : 'Save Draft'}
-                          </Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity
-                          onPress={handleSubmit}
+                          onPress={draftResponseId ? handleSubmit : handleMarkComplete}
                           disabled={submitting}
                           style={{
-                            flex: 2, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+                            flex: canSaveDraft ? 2 : 1,
+                            flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
                             paddingVertical: 14, borderRadius: 14, backgroundColor: '#059669',
                             opacity: submitting ? 0.6 : 1,
                           }}
