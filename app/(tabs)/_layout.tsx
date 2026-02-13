@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { View, Text, TouchableOpacity, Modal, Pressable, Alert, Animated } from 'react-native'
+import { View, Text, TouchableOpacity, Modal, Pressable, Alert, Animated, Platform } from 'react-native'
 import { Tabs, useRouter } from 'expo-router'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { LinearGradient } from 'expo-linear-gradient'
@@ -194,7 +194,17 @@ export default function TabLayout() {
                 key={item.label}
                 onPress={() => {
                   setShowMenu(false)
-                  if (item.route) router.push(item.route as any)
+                  if (item.route) {
+                    router.push(item.route as any)
+                  } else {
+                    setTimeout(() => {
+                      if (Platform.OS === 'web') {
+                        alert(`${item.label} is coming soon!`)
+                      } else {
+                        Alert.alert('Coming soon', `${item.label} will be available soon.`)
+                      }
+                    }, 200)
+                  }
                 }}
                 activeOpacity={0.7}
                 style={{
