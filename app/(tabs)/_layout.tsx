@@ -11,7 +11,7 @@ import { useAuth } from '@/lib/auth-context'
 
 const menuItems = [
   { label: 'Progress', icon: Heart, gradient: ['#34d399', '#14b8a6'] as const, route: '/progress' },
-  { label: 'My Practitioner', icon: User, gradient: ['#fb7185', '#ec4899'] as const, route: null },
+  { label: 'My Practitioner', icon: User, gradient: ['#fb7185', '#ec4899'] as const, route: '/practitioner' },
   { label: 'Balance', icon: PieChart, gradient: ['#8b5cf6', '#7c3aed'] as const, route: null },
   { label: 'Reflect', icon: Heart, gradient: ['#2dd4bf', '#10b981'] as const, route: null },
   { label: 'Settings', icon: Settings, gradient: ['#9ca3af', '#6b7280'] as const, route: null },
@@ -155,8 +155,9 @@ export default function TabLayout() {
             },
           }}
         />
-        {/* Hide progress from tabs — it lives under Menu */}
+        {/* Hide from tabs — accessed via Menu */}
         <Tabs.Screen name="progress" options={{ href: null }} />
+        <Tabs.Screen name="practitioner" options={{ href: null }} />
       </Tabs>
 
       <FloatingCameraButton />
