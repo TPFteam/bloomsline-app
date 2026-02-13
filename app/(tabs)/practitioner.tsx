@@ -31,6 +31,8 @@ import {
   CalendarCheck,
   Users,
   BookOpen,
+  ArrowLeft,
+  Plus,
 } from 'lucide-react-native'
 import { useAuth } from '@/lib/auth-context'
 import { supabase } from '@/lib/supabase'
@@ -127,6 +129,628 @@ function getSessionFormatLabel(format: string): string {
   }
 }
 
+function extractLocalized(val: any): string {
+  if (!val) return ''
+  if (typeof val === 'string') return val
+  return val.en || Object.values(val)[0] || ''
+}
+
+// ============================================
+// BLOCK RENDERER
+// ============================================
+
+function renderBlock(
+  block: any,
+  blockValue: unknown,
+  onBlockChange: (v: unknown) => void,
+) {
+  const content = typeof block.content === 'string' ? block.content : extractLocalized(block.content)
+  const isRequired = !!block.required
+
+  switch (block.type) {
+    // ── Display blocks ──
+    case 'heading':
+      return <Text style={{ fontSize: 18, fontWeight: '700', color: '#171717' }}>{content}</Text>
+
+    case 'paragraph':
+      return <Text style={{ fontSize: 15, color: '#4b5563', lineHeight: 22 }}>{content}</Text>
+
+    case 'quote':
+      return (
+        <View style={{ borderLeftWidth: 3, borderLeftColor: '#2dd4bf', paddingLeft: 16, paddingVertical: 8, backgroundColor: '#f0fdfa', borderTopRightRadius: 12, borderBottomRightRadius: 12 }}>
+          <Text style={{ fontSize: 15, color: '#4b5563', fontStyle: 'italic' }}>{content}</Text>
+        </View>
+      )
+
+    case 'tip':
+      return (
+        <View style={{ padding: 16, backgroundColor: '#ecfdf5', borderRadius: 16, borderWidth: 1, borderColor: '#a7f3d0' }}>
+          <Text style={{ fontSize: 15, color: '#065f46' }}>
+            <Text style={{ fontWeight: '600' }}>{'💡 Tip: '}</Text>{content}
+          </Text>
+        </View>
+      )
+
+    case 'divider':
+      return <View style={{ height: 1, backgroundColor: '#e5e7eb', marginVertical: 4 }} />
+
+    case 'key_points': {
+      const points: string[] = Array.isArray(block.points) ? block.points : []
+      return (
+        <View>
+          {content ? <Text style={{ fontWeight: '600', color: '#171717', marginBottom: 8, fontSize: 15 }}>{content}</Text> : null}
+          {points.map((pt, i) => (
+            <View key={i} style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 10, marginBottom: 6 }}>
+              <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: '#8b5cf6', marginTop: 6 }} />
+              <Text style={{ flex: 1, fontSize: 15, color: '#374151' }}>{typeof pt === 'string' ? pt : ''}</Text>
+            </View>
+          ))}
+        </View>
+      )
+    }
+
+    case 'callout': {
+      const ct = block.calloutType || 'info'
+      const cs: Record<string, { bg: string; border: string; text: string }> = {
+        info: { bg: '#eff6ff', border: '#3b82f6', text: '#1e40af' },
+        warning: { bg: '#fffbeb', border: '#f59e0b', text: '#92400e' },
+        success: { bg: '#ecfdf5', border: '#10b981', text: '#065f46' },
+        tip: { bg: '#f0fdf4', border: '#22c55e', text: '#166534' },
+        example: { bg: '#faf5ff', border: '#a855f7', text: '#6b21a8' },
+      }
+      const s = cs[ct] || cs.info
+      return (
+        <View style={{ padding: 16, backgroundColor: s.bg, borderRadius: 16, borderLeftWidth: 4, borderLeftColor: s.border }}>
+          <Text style={{ fontSize: 15, color: s.text, lineHeight: 22 }}>{content}</Text>
+        </View>
+      )
+    }
+
+    // ── Interactive blocks ──
+    case 'prompt':
+      return (
+        <View>
+          <Text style={{ fontSize: 15, fontWeight: '600', color: '#171717', marginBottom: 8 }}>
+            {content}{isRequired && <Text style={{ color: '#f43f5e' }}> *</Text>}
+          </Text>
+          <TextInput
+            value={(blockValue as string) || ''}
+            onChangeText={(t) => onBlockChange(t)}
+            placeholder="Share your thoughts..."
+            placeholderTextColor="#d1d5db"
+            multiline
+            style={{
+              backgroundColor: '#f9fafb', borderRadius: 16, padding: 16, fontSize: 15,
+              borderWidth: 2, borderColor: '#f3f4f6', color: '#374151',
+              minHeight: 120, textAlignVertical: 'top',
+            }}
+          />
+        </View>
+      )
+
+    case 'multiple_choice': {
+      const opts: any[] = Array.isArray(block.options) ? block.options : Array.isArray(block.choices) ? block.choices : []
+      return (
+        <View>
+          <Text style={{ fontSize: 15, fontWeight: '600', color: '#171717', marginBottom: 10 }}>
+            {content}{isRequired && <Text style={{ color: '#f43f5e' }}> *</Text>}
+          </Text>
+          <View style={{ gap: 8 }}>
+            {opts.map((opt, i) => {
+              const label = typeof opt === 'string' ? opt : opt.label
+              const sel = blockValue === i
+              return (
+                <TouchableOpacity key={i} onPress={() => onBlockChange(i)} activeOpacity={0.7} style={{
+                  flexDirection: 'row', alignItems: 'center', gap: 12,
+                  padding: 14, borderRadius: 16, borderWidth: 2,
+                  borderColor: sel ? '#2dd4bf' : '#f3f4f6',
+                  backgroundColor: sel ? '#f0fdfa' : '#fafafa',
+                }}>
+                  <View style={{
+                    width: 22, height: 22, borderRadius: 11, borderWidth: 2,
+                    borderColor: sel ? '#14b8a6' : '#d1d5db',
+                    backgroundColor: sel ? '#14b8a6' : 'transparent',
+                    alignItems: 'center', justifyContent: 'center',
+                  }}>
+                    {sel && <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: '#fff' }} />}
+                  </View>
+                  <Text style={{ fontSize: 15, color: sel ? '#0f766e' : '#4b5563', fontWeight: sel ? '600' : '400', flex: 1 }}>
+                    {label || `Option ${i + 1}`}
+                  </Text>
+                </TouchableOpacity>
+              )
+            })}
+          </View>
+        </View>
+      )
+    }
+
+    case 'yes_no':
+      return (
+        <View>
+          <Text style={{ fontSize: 15, fontWeight: '600', color: '#171717', marginBottom: 10 }}>
+            {content}{isRequired && <Text style={{ color: '#f43f5e' }}> *</Text>}
+          </Text>
+          <View style={{ flexDirection: 'row', gap: 12 }}>
+            {(['yes', 'no'] as const).map((val) => {
+              const sel = blockValue === val
+              return (
+                <TouchableOpacity key={val} onPress={() => onBlockChange(val)} activeOpacity={0.7} style={{
+                  flex: 1, alignItems: 'center', justifyContent: 'center',
+                  padding: 16, borderRadius: 16, borderWidth: 2,
+                  borderColor: sel ? (val === 'yes' ? '#a7f3d0' : '#d1d5db') : '#f3f4f6',
+                  backgroundColor: sel ? (val === 'yes' ? '#ecfdf5' : '#f3f4f6') : '#fafafa',
+                }}>
+                  <Text style={{ fontSize: 15, fontWeight: '600', color: sel ? (val === 'yes' ? '#059669' : '#374151') : '#9ca3af' }}>
+                    {val === 'yes' ? 'Yes' : 'No'}
+                  </Text>
+                </TouchableOpacity>
+              )
+            })}
+          </View>
+        </View>
+      )
+
+    case 'checklist': {
+      const items: any[] = Array.isArray(block.items) ? block.items : []
+      const checked: number[] = Array.isArray(blockValue) ? (blockValue as number[]) : []
+      return (
+        <View>
+          <Text style={{ fontSize: 15, fontWeight: '600', color: '#171717', marginBottom: 10 }}>
+            {content}{isRequired && <Text style={{ color: '#f43f5e' }}> *</Text>}
+          </Text>
+          <View style={{ gap: 8 }}>
+            {items.map((item, i) => {
+              const txt = typeof item === 'string' ? item : item.text
+              const on = checked.includes(i)
+              return (
+                <TouchableOpacity key={i} onPress={() => onBlockChange(on ? checked.filter((x) => x !== i) : [...checked, i])} activeOpacity={0.7} style={{
+                  flexDirection: 'row', alignItems: 'center', gap: 12,
+                  padding: 14, borderRadius: 16, borderWidth: 2,
+                  borderColor: on ? '#2dd4bf' : '#f3f4f6',
+                  backgroundColor: on ? '#f0fdfa' : '#fafafa',
+                }}>
+                  <View style={{
+                    width: 22, height: 22, borderRadius: 6, borderWidth: 2,
+                    borderColor: on ? '#14b8a6' : '#d1d5db',
+                    backgroundColor: on ? '#14b8a6' : 'transparent',
+                    alignItems: 'center', justifyContent: 'center',
+                  }}>
+                    {on && <Check size={14} color="#fff" />}
+                  </View>
+                  <Text style={{ flex: 1, fontSize: 15, color: on ? '#0f766e' : '#4b5563', fontWeight: on ? '600' : '400' }}>{txt}</Text>
+                </TouchableOpacity>
+              )
+            })}
+          </View>
+        </View>
+      )
+    }
+
+    case 'scale': {
+      const mn = (block.scaleMin ?? 1) as number
+      const mx = (block.scaleMax ?? 10) as number
+      const nums = Array.from({ length: mx - mn + 1 }, (_, i) => mn + i)
+      return (
+        <View>
+          <Text style={{ fontSize: 15, fontWeight: '600', color: '#171717', marginBottom: 10 }}>
+            {content}{isRequired && <Text style={{ color: '#f43f5e' }}> *</Text>}
+          </Text>
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, justifyContent: 'center' }}>
+            {nums.map((n) => (
+              <TouchableOpacity key={n} onPress={() => onBlockChange(n)} style={{
+                width: 44, height: 44, borderRadius: 14, alignItems: 'center', justifyContent: 'center',
+                backgroundColor: blockValue === n ? '#14b8a6' : '#f9fafb',
+                borderWidth: 2, borderColor: blockValue === n ? '#14b8a6' : '#f3f4f6',
+              }}>
+                <Text style={{ fontSize: 15, fontWeight: '600', color: blockValue === n ? '#fff' : '#4b5563' }}>{n}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+          {(block.scaleMinLabel || block.scaleMaxLabel) && (
+            <Text style={{ fontSize: 12, color: '#9ca3af', textAlign: 'center', marginTop: 8 }}>
+              {mn} = {block.scaleMinLabel || ''} · {mx} = {block.scaleMaxLabel || ''}
+            </Text>
+          )}
+        </View>
+      )
+    }
+
+    case 'likert': {
+      const scaleType = block.scaleType || 'likert'
+      const scale = (block.scaleRange || block.likertScale || 5) as number
+      const labels = block.likertLabels || {}
+      const scaleLabels: string[] = block.scaleLabels || []
+
+      if (scaleType === 'mood') {
+        const moods = [
+          { emoji: '😣', label: 'Struggling', value: 1 },
+          { emoji: '😔', label: 'Low', value: 2 },
+          { emoji: '😐', label: 'Okay', value: 3 },
+          { emoji: '😊', label: 'Good', value: 4 },
+          { emoji: '😄', label: 'Thriving', value: 5 },
+        ]
+        return (
+          <View>
+            <Text style={{ fontSize: 15, fontWeight: '600', color: '#171717', marginBottom: 10 }}>
+              {content}{isRequired && <Text style={{ color: '#f43f5e' }}> *</Text>}
+            </Text>
+            <View style={{ flexDirection: 'row', justifyContent: 'center', gap: 8 }}>
+              {moods.map((m) => (
+                <TouchableOpacity key={m.value} onPress={() => onBlockChange(m.value)} style={{
+                  alignItems: 'center', padding: 10, borderRadius: 16,
+                  backgroundColor: blockValue === m.value ? '#f0fdfa' : '#fafafa',
+                  borderWidth: 2, borderColor: blockValue === m.value ? '#2dd4bf' : 'transparent',
+                }}>
+                  <Text style={{ fontSize: 28 }}>{m.emoji}</Text>
+                  <Text style={{ fontSize: 10, color: blockValue === m.value ? '#0f766e' : '#9ca3af', fontWeight: '500', marginTop: 4 }}>{m.label}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </View>
+        )
+      }
+
+      if (scaleType === 'rating') {
+        return (
+          <View>
+            <Text style={{ fontSize: 15, fontWeight: '600', color: '#171717', marginBottom: 10 }}>
+              {content}{isRequired && <Text style={{ color: '#f43f5e' }}> *</Text>}
+            </Text>
+            <View style={{ flexDirection: 'row', justifyContent: 'center', gap: 8 }}>
+              {Array.from({ length: scale }, (_, i) => i + 1).map((n) => (
+                <TouchableOpacity key={n} onPress={() => onBlockChange(n)}>
+                  <Text style={{ fontSize: 32, color: blockValue !== undefined && n <= (blockValue as number) ? '#f59e0b' : '#e5e7eb' }}>★</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </View>
+        )
+      }
+
+      // Default likert
+      const nums = Array.from({ length: scale }, (_, i) => i + 1)
+      return (
+        <View>
+          <Text style={{ fontSize: 15, fontWeight: '600', color: '#171717', marginBottom: 10 }}>
+            {content}{isRequired && <Text style={{ color: '#f43f5e' }}> *</Text>}
+          </Text>
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, justifyContent: 'center' }}>
+            {nums.map((n) => (
+              <TouchableOpacity key={n} onPress={() => onBlockChange(n)} style={{
+                width: 44, height: 44, borderRadius: 14, alignItems: 'center', justifyContent: 'center',
+                backgroundColor: blockValue === n ? '#14b8a6' : '#f9fafb',
+                borderWidth: 2, borderColor: blockValue === n ? '#14b8a6' : '#f3f4f6',
+              }}>
+                <Text style={{ fontSize: 15, fontWeight: '600', color: blockValue === n ? '#fff' : '#4b5563' }}>{n}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+          {(scaleLabels[0] || labels.start || scaleLabels[scaleLabels.length - 1] || labels.end) && (
+            <Text style={{ fontSize: 12, color: '#9ca3af', textAlign: 'center', marginTop: 8 }}>
+              1 = {scaleLabels[0] || labels.start || ''} · {scale} = {scaleLabels[scaleLabels.length - 1] || labels.end || ''}
+            </Text>
+          )}
+        </View>
+      )
+    }
+
+    case 'mood': {
+      const emojiMap: Record<string, string> = { Angry: '😣', Frown: '😔', Meh: '😐', Smile: '😊', Laugh: '😄' }
+      const moodOpts: any[] = Array.isArray(block.moodOptions) ? block.moodOptions : [
+        { emoji: 'Angry', label: 'Struggling', value: 1 },
+        { emoji: 'Frown', label: 'Low', value: 2 },
+        { emoji: 'Meh', label: 'Okay', value: 3 },
+        { emoji: 'Smile', label: 'Good', value: 4 },
+        { emoji: 'Laugh', label: 'Thriving', value: 5 },
+      ]
+      return (
+        <View>
+          <Text style={{ fontSize: 15, fontWeight: '600', color: '#171717', marginBottom: 10 }}>
+            {content}{isRequired && <Text style={{ color: '#f43f5e' }}> *</Text>}
+          </Text>
+          <View style={{ flexDirection: 'row', justifyContent: 'center', gap: 8 }}>
+            {moodOpts.map((m, i) => {
+              const val = m.value ?? i + 1
+              return (
+                <TouchableOpacity key={i} onPress={() => onBlockChange(val)} style={{
+                  alignItems: 'center', padding: 10, borderRadius: 16,
+                  backgroundColor: blockValue === val ? '#f0fdfa' : '#fafafa',
+                  borderWidth: 2, borderColor: blockValue === val ? '#2dd4bf' : 'transparent',
+                }}>
+                  <Text style={{ fontSize: 28 }}>{emojiMap[m.emoji] || m.emoji}</Text>
+                  <Text style={{ fontSize: 10, color: blockValue === val ? '#0f766e' : '#9ca3af', fontWeight: '500', marginTop: 4 }}>{m.label}</Text>
+                </TouchableOpacity>
+              )
+            })}
+          </View>
+        </View>
+      )
+    }
+
+    case 'slider': {
+      const sMin = (block.sliderMin ?? 0) as number
+      const sMax = (block.sliderMax ?? 100) as number
+      const sStep = (block.sliderStep ?? 1) as number
+      const sUnit = (block.sliderUnit || '') as string
+      const range = (sMax - sMin) / sStep
+      if (range <= 20) {
+        const nums = Array.from({ length: Math.floor(range) + 1 }, (_, i) => sMin + i * sStep)
+        return (
+          <View>
+            <Text style={{ fontSize: 15, fontWeight: '600', color: '#171717', marginBottom: 10 }}>
+              {content}{isRequired && <Text style={{ color: '#f43f5e' }}> *</Text>}
+            </Text>
+            <Text style={{ fontSize: 24, fontWeight: '700', textAlign: 'center', color: '#14b8a6', marginBottom: 8 }}>
+              {blockValue !== undefined ? `${blockValue}${sUnit}` : '-'}
+            </Text>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, justifyContent: 'center' }}>
+              {nums.map((n) => (
+                <TouchableOpacity key={n} onPress={() => onBlockChange(n)} style={{
+                  minWidth: 40, height: 40, borderRadius: 12, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 8,
+                  backgroundColor: blockValue === n ? '#14b8a6' : '#f9fafb',
+                  borderWidth: 2, borderColor: blockValue === n ? '#14b8a6' : '#f3f4f6',
+                }}>
+                  <Text style={{ fontSize: 13, fontWeight: '600', color: blockValue === n ? '#fff' : '#4b5563' }}>{n}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </View>
+        )
+      }
+      return (
+        <View>
+          <Text style={{ fontSize: 15, fontWeight: '600', color: '#171717', marginBottom: 10 }}>
+            {content}{isRequired && <Text style={{ color: '#f43f5e' }}> *</Text>}
+          </Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            <TextInput
+              value={blockValue !== undefined ? String(blockValue) : ''}
+              onChangeText={(t) => { const n = Number(t); if (!isNaN(n)) onBlockChange(n) }}
+              keyboardType="numeric"
+              placeholder={`${sMin} – ${sMax}`}
+              placeholderTextColor="#d1d5db"
+              style={{
+                flex: 1, backgroundColor: '#f9fafb', borderRadius: 16, padding: 14, fontSize: 16,
+                borderWidth: 2, borderColor: '#f3f4f6', color: '#374151', textAlign: 'center',
+              }}
+            />
+            {sUnit ? <Text style={{ fontSize: 14, color: '#6b7280' }}>{sUnit}</Text> : null}
+          </View>
+          <Text style={{ fontSize: 12, color: '#9ca3af', textAlign: 'center', marginTop: 4 }}>
+            {sMin}{sUnit} – {sMax}{sUnit}
+          </Text>
+        </View>
+      )
+    }
+
+    case 'numeric':
+      return (
+        <View>
+          <Text style={{ fontSize: 15, fontWeight: '600', color: '#171717', marginBottom: 8 }}>
+            {content}{isRequired && <Text style={{ color: '#f43f5e' }}> *</Text>}
+          </Text>
+          <TextInput
+            value={blockValue !== undefined && blockValue !== null ? String(blockValue) : ''}
+            onChangeText={(t) => { if (t === '') onBlockChange(undefined); else { const n = Number(t); if (!isNaN(n)) onBlockChange(n) } }}
+            keyboardType="numeric"
+            placeholder="Enter a number..."
+            placeholderTextColor="#d1d5db"
+            style={{
+              backgroundColor: '#f9fafb', borderRadius: 16, padding: 14, fontSize: 16,
+              borderWidth: 2, borderColor: '#f3f4f6', color: '#374151',
+            }}
+          />
+        </View>
+      )
+
+    case 'date_picker':
+      return (
+        <View>
+          <Text style={{ fontSize: 15, fontWeight: '600', color: '#171717', marginBottom: 8 }}>
+            {content}{isRequired && <Text style={{ color: '#f43f5e' }}> *</Text>}
+          </Text>
+          <TextInput
+            value={(blockValue as string) || ''}
+            onChangeText={(t) => onBlockChange(t)}
+            placeholder="YYYY-MM-DD"
+            placeholderTextColor="#d1d5db"
+            style={{
+              backgroundColor: '#f9fafb', borderRadius: 16, padding: 14, fontSize: 15,
+              borderWidth: 2, borderColor: '#f3f4f6', color: '#374151',
+            }}
+          />
+        </View>
+      )
+
+    case 'time_input':
+      return (
+        <View>
+          <Text style={{ fontSize: 15, fontWeight: '600', color: '#171717', marginBottom: 8 }}>
+            {content}{isRequired && <Text style={{ color: '#f43f5e' }}> *</Text>}
+          </Text>
+          <TextInput
+            value={(blockValue as string) || ''}
+            onChangeText={(t) => onBlockChange(t)}
+            placeholder="HH:MM"
+            placeholderTextColor="#d1d5db"
+            style={{
+              backgroundColor: '#f9fafb', borderRadius: 16, padding: 14, fontSize: 15,
+              borderWidth: 2, borderColor: '#f3f4f6', color: '#374151',
+            }}
+          />
+        </View>
+      )
+
+    case 'list_input': {
+      const listItems: string[] = Array.isArray(blockValue) ? (blockValue as string[]) : ['']
+      return (
+        <View>
+          <Text style={{ fontSize: 15, fontWeight: '600', color: '#171717', marginBottom: 10 }}>
+            {content}{isRequired && <Text style={{ color: '#f43f5e' }}> *</Text>}
+          </Text>
+          <View style={{ gap: 8 }}>
+            {listItems.map((item, i) => (
+              <View key={i} style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <View style={{ width: 24, height: 24, borderRadius: 8, backgroundColor: '#f3f4f6', alignItems: 'center', justifyContent: 'center' }}>
+                  <Text style={{ fontSize: 12, color: '#9ca3af', fontWeight: '600' }}>{i + 1}</Text>
+                </View>
+                <TextInput
+                  value={item}
+                  onChangeText={(t) => { const a = [...listItems]; a[i] = t; onBlockChange(a) }}
+                  placeholder={`Item ${i + 1}...`}
+                  placeholderTextColor="#d1d5db"
+                  style={{
+                    flex: 1, backgroundColor: '#f9fafb', borderRadius: 14, padding: 12, fontSize: 15,
+                    borderWidth: 2, borderColor: '#f3f4f6', color: '#374151',
+                  }}
+                />
+                {listItems.length > 1 && (
+                  <TouchableOpacity onPress={() => onBlockChange(listItems.filter((_: any, idx: number) => idx !== i))} style={{ padding: 6 }}>
+                    <X size={18} color="#ef4444" />
+                  </TouchableOpacity>
+                )}
+              </View>
+            ))}
+            <TouchableOpacity onPress={() => onBlockChange([...listItems, ''])} style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 8, paddingHorizontal: 4 }}>
+              <Plus size={16} color="#14b8a6" />
+              <Text style={{ fontSize: 14, fontWeight: '600', color: '#14b8a6' }}>Add item</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      )
+    }
+
+    case 'matrix_rating': {
+      const matrixItems: string[] = Array.isArray(block.matrixItems) ? block.matrixItems : []
+      const scaleMax = (block.matrixScaleMax ?? 5) as number
+      const mLabels = block.matrixScaleLabels || {}
+      const ratings = (blockValue as Record<string, number>) || {}
+
+      if (matrixItems.length === 0) {
+        const cur = ratings['0'] || 0
+        return (
+          <View>
+            <Text style={{ fontSize: 15, fontWeight: '600', color: '#171717', marginBottom: 10 }}>
+              {content}{isRequired && <Text style={{ color: '#f43f5e' }}> *</Text>}
+            </Text>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, justifyContent: 'center' }}>
+              {Array.from({ length: scaleMax }, (_, i) => i + 1).map((n) => (
+                <TouchableOpacity key={n} onPress={() => onBlockChange({ ...ratings, '0': n })} style={{
+                  width: 48, height: 48, borderRadius: 16, alignItems: 'center', justifyContent: 'center',
+                  backgroundColor: cur === n ? '#14b8a6' : '#f9fafb',
+                  borderWidth: 2, borderColor: cur === n ? '#14b8a6' : '#f3f4f6',
+                }}>
+                  <Text style={{ fontSize: 16, fontWeight: '700', color: cur === n ? '#fff' : '#4b5563' }}>{n}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+            {(mLabels.min || mLabels.max) && (
+              <Text style={{ fontSize: 12, color: '#9ca3af', textAlign: 'center', marginTop: 8 }}>
+                1 = {mLabels.min || 'Not at all'} · {scaleMax} = {mLabels.max || 'Completely'}
+              </Text>
+            )}
+          </View>
+        )
+      }
+
+      return (
+        <View>
+          <Text style={{ fontSize: 15, fontWeight: '600', color: '#171717', marginBottom: 10 }}>
+            {content}{isRequired && <Text style={{ color: '#f43f5e' }}> *</Text>}
+          </Text>
+          <View style={{ gap: 12 }}>
+            {matrixItems.map((item, idx) => (
+              <View key={idx} style={{ backgroundColor: '#fff', borderRadius: 16, padding: 14, borderWidth: 1, borderColor: '#f3f4f6' }}>
+                <Text style={{ fontSize: 14, fontWeight: '500', color: '#374151', marginBottom: 8 }}>{item}</Text>
+                <View style={{ flexDirection: 'row', gap: 6, justifyContent: 'center' }}>
+                  {Array.from({ length: scaleMax }, (_, i) => i + 1).map((n) => (
+                    <TouchableOpacity key={n} onPress={() => onBlockChange({ ...ratings, [idx.toString()]: n })} style={{
+                      width: 36, height: 36, borderRadius: 12, alignItems: 'center', justifyContent: 'center',
+                      backgroundColor: ratings[idx.toString()] === n ? '#14b8a6' : '#f9fafb',
+                      borderWidth: 2, borderColor: ratings[idx.toString()] === n ? '#14b8a6' : '#f3f4f6',
+                    }}>
+                      <Text style={{ fontSize: 13, fontWeight: '600', color: ratings[idx.toString()] === n ? '#fff' : '#4b5563' }}>{n}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+            ))}
+          </View>
+          {(mLabels.min || mLabels.max) && (
+            <Text style={{ fontSize: 12, color: '#9ca3af', textAlign: 'center', marginTop: 8 }}>
+              1 = {mLabels.min || ''} · {scaleMax} = {mLabels.max || ''}
+            </Text>
+          )}
+        </View>
+      )
+    }
+
+    case 'table_exercise': {
+      const columns: any[] = Array.isArray(block.columns) ? block.columns : []
+      const instr = block.instructions || null
+      const rows: any[] = Array.isArray(blockValue) && (blockValue as any[]).length > 0 ? (blockValue as any[]) : [{}]
+      if (columns.length === 0) return <Text style={{ color: '#9ca3af' }}>No columns defined</Text>
+      return (
+        <View>
+          {content ? <Text style={{ fontSize: 15, fontWeight: '600', color: '#171717', marginBottom: 10 }}>{content}</Text> : null}
+          {instr && (
+            <View style={{ backgroundColor: '#ecfdf5', borderRadius: 14, padding: 12, marginBottom: 12, borderWidth: 1, borderColor: '#a7f3d0' }}>
+              <Text style={{ fontSize: 13, color: '#065f46' }}>{instr}</Text>
+            </View>
+          )}
+          <View style={{ gap: 16 }}>
+            {rows.map((row: any, ri: number) => (
+              <View key={ri} style={{ backgroundColor: '#fff', borderRadius: 16, padding: 16, borderWidth: 2, borderColor: '#a7f3d0' }}>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                  <Text style={{ fontSize: 16, fontWeight: '700', color: '#171717' }}>Entry {ri + 1}</Text>
+                  {rows.length > 1 && (
+                    <TouchableOpacity onPress={() => onBlockChange(rows.filter((_: any, i: number) => i !== ri))}>
+                      <X size={18} color="#ef4444" />
+                    </TouchableOpacity>
+                  )}
+                </View>
+                {columns.map((col: any) => (
+                  <View key={col.id} style={{ marginBottom: 10 }}>
+                    <Text style={{ fontSize: 13, fontWeight: '600', color: '#374151', marginBottom: 4 }}>{col.header}</Text>
+                    {col.description && <Text style={{ fontSize: 11, color: '#9ca3af', marginBottom: 4, fontStyle: 'italic' }}>{col.description}</Text>}
+                    <TextInput
+                      value={row[col.id] || ''}
+                      onChangeText={(t) => { const nr = [...rows]; nr[ri] = { ...nr[ri], [col.id]: t }; onBlockChange(nr) }}
+                      placeholder="Type here..."
+                      placeholderTextColor="#d1d5db"
+                      multiline
+                      style={{
+                        backgroundColor: '#f9fafb', borderRadius: 12, padding: 12, fontSize: 14,
+                        borderWidth: 1, borderColor: '#e5e7eb', color: '#374151',
+                        minHeight: 60, textAlignVertical: 'top',
+                      }}
+                    />
+                  </View>
+                ))}
+              </View>
+            ))}
+          </View>
+          <TouchableOpacity onPress={() => onBlockChange([...rows, {}])} style={{
+            flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
+            paddingVertical: 12, marginTop: 8,
+          }}>
+            <Plus size={16} color="#14b8a6" />
+            <Text style={{ fontSize: 14, fontWeight: '600', color: '#14b8a6' }}>Add Entry</Text>
+          </TouchableOpacity>
+        </View>
+      )
+    }
+
+    default:
+      return (
+        <View style={{ padding: 12, backgroundColor: '#f9fafb', borderRadius: 12 }}>
+          <Text style={{ fontSize: 13, color: '#9ca3af' }}>Unsupported block type: {block.type}</Text>
+        </View>
+      )
+  }
+}
+
 // ============================================
 // MAIN SCREEN
 // ============================================
@@ -146,6 +770,15 @@ export default function PractitionerScreen() {
 
   // Resource detail modal
   const [viewingResource, setViewingResource] = useState<ResourceItem | null>(null)
+
+  // Resource fill modal
+  const [fillResource, setFillResource] = useState<any>(null)
+  const [fillLoading, setFillLoading] = useState(false)
+  const [activeResourceItem, setActiveResourceItem] = useState<ResourceItem | null>(null)
+  const [responses, setResponses] = useState<Record<string, unknown>>({})
+  const [draftResponseId, setDraftResponseId] = useState<string | null>(null)
+  const [submitting, setSubmitting] = useState(false)
+  const [saving, setSaving] = useState(false)
 
   // Reschedule modal
   const [rescheduleSessionId, setRescheduleSessionId] = useState<string | null>(null)
@@ -445,6 +1078,198 @@ export default function PractitionerScreen() {
       console.error('Error declining proposed date:', error)
     } finally {
       setActionLoading(null)
+    }
+  }
+
+  // ============================================
+  // RESOURCE FILL
+  // ============================================
+
+  async function openResource(item: ResourceItem) {
+    setViewingResource(null)
+    setFillLoading(true)
+    setActiveResourceItem(item)
+    setResponses({})
+    setDraftResponseId(null)
+
+    try {
+      const { data: resource, error } = await supabase
+        .from('resources')
+        .select('*')
+        .eq('id', item.resourceId)
+        .single()
+
+      if (error || !resource) throw error || new Error('Resource not found')
+      setFillResource(resource)
+
+      if (item.type === 'assignment') {
+        // Get existing response or create draft
+        const { data: existing } = await supabase
+          .from('resource_responses')
+          .select('*')
+          .eq('assignment_id', item.id)
+          .eq('member_id', member!.id)
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle()
+
+        if (existing) {
+          setDraftResponseId(existing.id)
+          setResponses(existing.responses || {})
+        } else {
+          const { data: newResp } = await supabase
+            .from('resource_responses')
+            .insert({
+              assignment_id: item.id,
+              resource_id: item.resourceId,
+              member_id: member!.id,
+              practitioner_id: member!.practitioner_id,
+              responses: {},
+              status: 'draft',
+              started_at: new Date().toISOString(),
+            })
+            .select()
+            .single()
+
+          if (newResp) {
+            setDraftResponseId(newResp.id)
+            await supabase
+              .from('resource_assignments')
+              .update({ status: 'in_progress' })
+              .eq('id', item.id)
+          }
+        }
+      } else {
+        // Shared resource — mark as viewed
+        await supabase
+          .from('member_shared_resources')
+          .update({ viewed_at: new Date().toISOString() })
+          .eq('id', item.id)
+      }
+    } catch (err) {
+      console.error('Error opening resource:', err)
+      if (Platform.OS === 'web') alert('Failed to load resource.')
+      else Alert.alert('Error', 'Failed to load resource.')
+      setFillResource(null)
+      setActiveResourceItem(null)
+    } finally {
+      setFillLoading(false)
+    }
+  }
+
+  function closeFill() {
+    setFillResource(null)
+    setActiveResourceItem(null)
+    setResponses({})
+    setDraftResponseId(null)
+    fetchData()
+  }
+
+  function handleCloseFill() {
+    if (activeResourceItem?.type === 'assignment' && draftResponseId && Object.keys(responses).length > 0) {
+      if (Platform.OS === 'web') {
+        if (confirm('Save your progress before leaving?')) {
+          handleSaveDraft().then(closeFill)
+        } else {
+          closeFill()
+        }
+      } else {
+        Alert.alert('Save progress?', 'You have unsaved changes.', [
+          { text: 'Discard', style: 'destructive', onPress: closeFill },
+          { text: 'Save & Close', onPress: () => handleSaveDraft().then(closeFill) },
+        ])
+      }
+    } else {
+      closeFill()
+    }
+  }
+
+  async function handleSaveDraft() {
+    if (!draftResponseId) return
+    setSaving(true)
+    try {
+      await supabase
+        .from('resource_responses')
+        .update({ responses, updated_at: new Date().toISOString() })
+        .eq('id', draftResponseId)
+        .eq('status', 'draft')
+
+      if (Platform.OS === 'web') {
+        // silent
+      } else {
+        Alert.alert('Saved', 'Your progress has been saved.')
+      }
+    } catch (err) {
+      console.error('Error saving draft:', err)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function handleSubmit() {
+    if (!draftResponseId || !activeResourceItem) return
+    setSubmitting(true)
+    try {
+      await supabase
+        .from('resource_responses')
+        .update({
+          responses,
+          status: 'submitted',
+          submitted_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', draftResponseId)
+
+      await supabase
+        .from('resource_assignments')
+        .update({ status: 'completed', updated_at: new Date().toISOString() })
+        .eq('id', activeResourceItem.id)
+
+      closeFill()
+      if (Platform.OS === 'web') alert('Submitted successfully!')
+      else Alert.alert('Submitted', 'Your response has been submitted successfully.')
+    } catch (err) {
+      console.error('Error submitting:', err)
+      if (Platform.OS === 'web') alert('Failed to submit. Please try again.')
+      else Alert.alert('Error', 'Failed to submit. Please try again.')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  async function handleMarkComplete() {
+    if (!activeResourceItem) return
+    setSubmitting(true)
+    try {
+      if (activeResourceItem.type === 'shared') {
+        await supabase
+          .from('member_shared_resources')
+          .update({ viewed_at: new Date().toISOString() })
+          .eq('id', activeResourceItem.id)
+      } else {
+        await supabase
+          .from('resource_assignments')
+          .update({ status: 'completed', updated_at: new Date().toISOString() })
+          .eq('id', activeResourceItem.id)
+
+        if (draftResponseId) {
+          await supabase
+            .from('resource_responses')
+            .update({
+              responses,
+              status: 'submitted',
+              submitted_at: new Date().toISOString(),
+            })
+            .eq('id', draftResponseId)
+        }
+      }
+      closeFill()
+      if (Platform.OS === 'web') alert('Marked as complete!')
+      else Alert.alert('Done', 'Resource marked as complete.')
+    } catch (err) {
+      console.error('Error marking complete:', err)
+    } finally {
+      setSubmitting(false)
     }
   }
 
@@ -1169,14 +1994,7 @@ export default function PractitionerScreen() {
                   {/* Action button */}
                   {viewingResource.status !== 'completed' && (
                     <TouchableOpacity
-                      onPress={() => {
-                        setViewingResource(null)
-                        if (Platform.OS === 'web') {
-                          alert('Opening resources in the app is coming soon. Please use the web app to complete worksheets.')
-                        } else {
-                          Alert.alert('Coming soon', 'Opening resources in the app is coming soon. Please use the web app to complete worksheets.')
-                        }
-                      }}
+                      onPress={() => openResource(viewingResource)}
                       style={{
                         backgroundColor: '#059669', borderRadius: 14, paddingVertical: 14,
                         alignItems: 'center', marginTop: 8,
@@ -1192,6 +2010,152 @@ export default function PractitionerScreen() {
             })()}
           </Pressable>
         </Pressable>
+      </Modal>
+
+      {/* ============================================ */}
+      {/* RESOURCE FILL MODAL (full screen) */}
+      {/* ============================================ */}
+      <Modal visible={!!fillResource || fillLoading} animationType="slide" onRequestClose={handleCloseFill}>
+        <SafeAreaView style={{ flex: 1, backgroundColor: '#fff' }} edges={['top']}>
+          {/* Header */}
+          <View style={{
+            flexDirection: 'row', alignItems: 'center', padding: 16,
+            borderBottomWidth: 1, borderBottomColor: '#f3f4f6',
+          }}>
+            <TouchableOpacity onPress={handleCloseFill} style={{ padding: 4, marginRight: 12 }}>
+              <ArrowLeft size={24} color="#374151" />
+            </TouchableOpacity>
+            <View style={{ flex: 1 }}>
+              <Text style={{ fontSize: 16, fontWeight: '700', color: '#171717' }} numberOfLines={1}>
+                {fillResource ? extractLocalized(fillResource.title) : 'Loading...'}
+              </Text>
+              {fillResource && (
+                <Text style={{ fontSize: 12, color: '#9ca3af', textTransform: 'capitalize' }}>
+                  {(fillResource.type || '').replace(/_/g, ' ')}
+                </Text>
+              )}
+            </View>
+            {activeResourceItem?.type === 'assignment' && draftResponseId && (
+              <TouchableOpacity onPress={handleSaveDraft} disabled={saving} style={{ padding: 6 }}>
+                <Text style={{ fontSize: 13, fontWeight: '600', color: saving ? '#9ca3af' : '#059669' }}>
+                  {saving ? 'Saving...' : 'Save'}
+                </Text>
+              </TouchableOpacity>
+            )}
+          </View>
+
+          {fillLoading ? (
+            <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+              <ActivityIndicator size="large" color="#059669" />
+              <Text style={{ fontSize: 14, color: '#9ca3af', marginTop: 12 }}>Loading resource...</Text>
+            </View>
+          ) : fillResource ? (
+            <>
+              <ScrollView
+                contentContainerStyle={{ padding: 20, paddingBottom: 120, gap: 16 }}
+                showsVerticalScrollIndicator={false}
+              >
+                {/* Practitioner instructions */}
+                {activeResourceItem?.instructions && (
+                  <View style={{
+                    backgroundColor: '#ecfdf5', borderRadius: 16, padding: 16,
+                    borderWidth: 1, borderColor: '#a7f3d0',
+                  }}>
+                    <Text style={{ fontSize: 13, fontWeight: '600', color: '#059669', marginBottom: 4 }}>
+                      {activeResourceItem.type === 'shared' ? "Practitioner's message" : 'Instructions'}
+                    </Text>
+                    <Text style={{ fontSize: 14, color: '#374151', lineHeight: 20 }}>
+                      {activeResourceItem.instructions}
+                    </Text>
+                  </View>
+                )}
+
+                {/* Resource description */}
+                {fillResource.description && (
+                  <Text style={{ fontSize: 14, color: '#6b7280', lineHeight: 20 }}>
+                    {extractLocalized(fillResource.description)}
+                  </Text>
+                )}
+
+                {/* Render blocks */}
+                {(fillResource.blocks || []).map((block: any) => (
+                  <View key={block.id}>
+                    {renderBlock(
+                      block,
+                      responses[block.id],
+                      (val) => setResponses(prev => ({ ...prev, [block.id]: val })),
+                    )}
+                  </View>
+                ))}
+              </ScrollView>
+
+              {/* Bottom action bar */}
+              <View style={{
+                position: 'absolute', bottom: 0, left: 0, right: 0,
+                padding: 16, paddingBottom: 36, backgroundColor: '#fff',
+                borderTopWidth: 1, borderTopColor: '#f3f4f6',
+                shadowColor: '#000', shadowOffset: { width: 0, height: -4 }, shadowOpacity: 0.06, shadowRadius: 8,
+              }}>
+                {(() => {
+                  const hasInteractiveBlocks = (fillResource.blocks || []).some((b: any) =>
+                    ['prompt', 'multiple_choice', 'yes_no', 'checklist', 'scale', 'likert',
+                      'mood', 'slider', 'numeric', 'date_picker', 'time_input', 'list_input',
+                      'matrix_rating', 'table_exercise'].includes(b.type)
+                  )
+
+                  if (activeResourceItem?.type === 'assignment' && hasInteractiveBlocks) {
+                    return (
+                      <View style={{ flexDirection: 'row', gap: 12 }}>
+                        <TouchableOpacity
+                          onPress={handleSaveDraft}
+                          disabled={saving || !draftResponseId}
+                          style={{
+                            flex: 1, paddingVertical: 14, alignItems: 'center', borderRadius: 14,
+                            backgroundColor: '#f3f4f6',
+                            opacity: saving || !draftResponseId ? 0.5 : 1,
+                          }}
+                        >
+                          <Text style={{ fontSize: 15, fontWeight: '600', color: '#374151' }}>
+                            {saving ? 'Saving...' : 'Save Draft'}
+                          </Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          onPress={handleSubmit}
+                          disabled={submitting}
+                          style={{
+                            flex: 2, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+                            paddingVertical: 14, borderRadius: 14, backgroundColor: '#059669',
+                            opacity: submitting ? 0.6 : 1,
+                          }}
+                        >
+                          {submitting ? <ActivityIndicator size="small" color="#fff" /> : <Check size={18} color="#fff" />}
+                          <Text style={{ fontSize: 15, fontWeight: '600', color: '#fff' }}>Submit</Text>
+                        </TouchableOpacity>
+                      </View>
+                    )
+                  }
+
+                  return (
+                    <TouchableOpacity
+                      onPress={handleMarkComplete}
+                      disabled={submitting}
+                      style={{
+                        flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+                        paddingVertical: 14, borderRadius: 14, backgroundColor: '#059669',
+                        opacity: submitting ? 0.6 : 1,
+                      }}
+                    >
+                      {submitting ? <ActivityIndicator size="small" color="#fff" /> : <CheckCircle2 size={18} color="#fff" />}
+                      <Text style={{ fontSize: 15, fontWeight: '600', color: '#fff' }}>
+                        {activeResourceItem?.type === 'assignment' ? 'Mark Complete' : 'Mark as Read'}
+                      </Text>
+                    </TouchableOpacity>
+                  )
+                })()}
+              </View>
+            </>
+          ) : null}
+        </SafeAreaView>
       </Modal>
     </SafeAreaView>
   )
