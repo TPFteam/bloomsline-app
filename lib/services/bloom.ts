@@ -1,6 +1,6 @@
 import { supabase } from '@/lib/supabase'
 
-const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3001'
+const API_URL = process.env.EXPO_PUBLIC_API_URL || 'https://www.bloomsline.com'
 
 export interface ChatRequest {
   message: string
