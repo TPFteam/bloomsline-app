@@ -780,6 +780,10 @@ export default function PractitionerScreen() {
   const [submitting, setSubmitting] = useState(false)
   const [saving, setSaving] = useState(false)
 
+  // Quick Access modals
+  const [quickModal, setQuickModal] = useState<'practitioners' | 'assessments' | null>(null)
+  const [assessmentFilter, setAssessmentFilter] = useState<'all' | 'pending' | 'completed'>('all')
+
   // Reschedule modal
   const [rescheduleSessionId, setRescheduleSessionId] = useState<string | null>(null)
   const [rescheduleReason, setRescheduleReason] = useState('')
@@ -1759,11 +1763,11 @@ export default function PractitionerScreen() {
           <Text style={{ fontSize: 17, fontWeight: '700', color: '#171717', marginBottom: 12 }}>Quick Access</Text>
           <View style={{ gap: 8 }}>
             {[
-              { label: 'My Practitioners', desc: 'View your practitioners', colors: ['#8b5cf6', '#7c3aed'] as [string, string], Icon: Users },
-              { label: 'My Assessments', desc: 'Assessments and exercises', colors: ['#059669', '#0d9488'] as [string, string], Icon: FileText },
-              { label: 'My Stories', desc: 'Therapeutic stories', colors: ['#f59e0b', '#ea580c'] as [string, string], Icon: BookOpen },
+              { label: 'My Practitioners', desc: 'View your practitioners', colors: ['#8b5cf6', '#7c3aed'] as [string, string], Icon: Users, action: () => setQuickModal('practitioners') },
+              { label: 'My Assessments', desc: 'Assessments and exercises', colors: ['#059669', '#0d9488'] as [string, string], Icon: FileText, action: () => { setAssessmentFilter('all'); setQuickModal('assessments') } },
+              { label: 'My Stories', desc: 'Therapeutic stories', colors: ['#f59e0b', '#ea580c'] as [string, string], Icon: BookOpen, action: () => { if (Platform.OS === 'web') alert('Stories are coming soon!'); else Alert.alert('Coming soon', 'Therapeutic stories will be available soon.') } },
             ].map((item) => (
-              <TouchableOpacity key={item.label} activeOpacity={0.7} style={{
+              <TouchableOpacity key={item.label} activeOpacity={0.7} onPress={item.action} style={{
                 flexDirection: 'row', alignItems: 'center', gap: 14,
                 backgroundColor: '#fff', borderRadius: 18, padding: 16,
                 borderWidth: 1, borderColor: '#f3f4f6',
@@ -2010,6 +2014,242 @@ export default function PractitionerScreen() {
             })()}
           </Pressable>
         </Pressable>
+      </Modal>
+
+      {/* ============================================ */}
+      {/* MY PRACTITIONERS MODAL */}
+      {/* ============================================ */}
+      <Modal visible={quickModal === 'practitioners'} animationType="slide" onRequestClose={() => setQuickModal(null)}>
+        <SafeAreaView style={{ flex: 1, backgroundColor: '#fafafa' }} edges={['top']}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', padding: 16, borderBottomWidth: 1, borderBottomColor: '#f3f4f6', backgroundColor: '#fff' }}>
+            <TouchableOpacity onPress={() => setQuickModal(null)} style={{ padding: 4, marginRight: 12 }}>
+              <ArrowLeft size={24} color="#374151" />
+            </TouchableOpacity>
+            <Text style={{ fontSize: 18, fontWeight: '700', color: '#171717' }}>My Practitioners</Text>
+          </View>
+          <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 40 }}>
+            {practitioner ? (
+              <View style={{
+                backgroundColor: '#fff', borderRadius: 20, padding: 20,
+                borderWidth: 1, borderColor: '#f3f4f6',
+                shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.04, shadowRadius: 6, elevation: 2,
+              }}>
+                {/* Avatar + name */}
+                <View style={{ alignItems: 'center', marginBottom: 20 }}>
+                  <LinearGradient
+                    colors={['#8b5cf6', '#7c3aed']}
+                    style={{ width: 80, height: 80, borderRadius: 40, alignItems: 'center', justifyContent: 'center', marginBottom: 12 }}
+                  >
+                    <Text style={{ color: '#fff', fontSize: 32, fontWeight: '700' }}>
+                      {(practitioner.full_name || '?')[0].toUpperCase()}
+                    </Text>
+                  </LinearGradient>
+                  <Text style={{ fontSize: 20, fontWeight: '700', color: '#171717' }}>
+                    {practitioner.full_name || 'Your Practitioner'}
+                  </Text>
+                  {practitioner.headline && (
+                    <Text style={{ fontSize: 14, color: '#6b7280', marginTop: 4, textAlign: 'center' }}>
+                      {practitioner.headline}
+                    </Text>
+                  )}
+                  {practitioner.email && (
+                    <Text style={{ fontSize: 13, color: '#9ca3af', marginTop: 4 }}>{practitioner.email}</Text>
+                  )}
+                </View>
+
+                {/* Specialties */}
+                {practitioner.specialties.length > 0 && (
+                  <View style={{ marginBottom: 16 }}>
+                    <Text style={{ fontSize: 13, fontWeight: '600', color: '#374151', marginBottom: 8 }}>Specialties</Text>
+                    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
+                      {practitioner.specialties.map((s, i) => (
+                        <View key={i} style={{ backgroundColor: '#f5f3ff', borderRadius: 10, paddingHorizontal: 10, paddingVertical: 5 }}>
+                          <Text style={{ fontSize: 12, fontWeight: '500', color: '#7c3aed' }}>{s}</Text>
+                        </View>
+                      ))}
+                    </View>
+                  </View>
+                )}
+
+                {/* Credentials */}
+                {practitioner.credentials.length > 0 && (
+                  <View style={{ marginBottom: 16 }}>
+                    <Text style={{ fontSize: 13, fontWeight: '600', color: '#374151', marginBottom: 8 }}>Credentials</Text>
+                    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
+                      {practitioner.credentials.map((c, i) => (
+                        <View key={i} style={{ backgroundColor: '#ecfdf5', borderRadius: 10, paddingHorizontal: 10, paddingVertical: 5 }}>
+                          <Text style={{ fontSize: 12, fontWeight: '500', color: '#059669' }}>{c}</Text>
+                        </View>
+                      ))}
+                    </View>
+                  </View>
+                )}
+
+                {/* Stats */}
+                <View style={{
+                  flexDirection: 'row', gap: 12, marginTop: 8,
+                  paddingTop: 16, borderTopWidth: 1, borderTopColor: '#f3f4f6',
+                }}>
+                  <View style={{ flex: 1, alignItems: 'center', backgroundColor: '#f5f3ff', borderRadius: 14, paddingVertical: 12 }}>
+                    <Text style={{ fontSize: 20, fontWeight: '800', color: '#7c3aed' }}>
+                      {pastSessions.filter(s => s.status === 'completed').length}
+                    </Text>
+                    <Text style={{ fontSize: 11, color: '#6b7280', marginTop: 2 }}>Sessions</Text>
+                  </View>
+                  <View style={{ flex: 1, alignItems: 'center', backgroundColor: '#ecfdf5', borderRadius: 14, paddingVertical: 12 }}>
+                    <Text style={{ fontSize: 20, fontWeight: '800', color: '#059669' }}>
+                      {resources.length}
+                    </Text>
+                    <Text style={{ fontSize: 11, color: '#6b7280', marginTop: 2 }}>Resources</Text>
+                  </View>
+                  <View style={{ flex: 1, alignItems: 'center', backgroundColor: '#eff6ff', borderRadius: 14, paddingVertical: 12 }}>
+                    <Text style={{ fontSize: 20, fontWeight: '800', color: '#3b82f6' }}>
+                      {upcomingSessions.length}
+                    </Text>
+                    <Text style={{ fontSize: 11, color: '#6b7280', marginTop: 2 }}>Upcoming</Text>
+                  </View>
+                </View>
+              </View>
+            ) : (
+              <View style={{ alignItems: 'center', paddingVertical: 60 }}>
+                <View style={{
+                  width: 64, height: 64, borderRadius: 32, backgroundColor: '#f3f4f6',
+                  alignItems: 'center', justifyContent: 'center', marginBottom: 12,
+                }}>
+                  <Users size={32} color="#9ca3af" />
+                </View>
+                <Text style={{ fontSize: 16, fontWeight: '600', color: '#171717' }}>No practitioner yet</Text>
+                <Text style={{ fontSize: 13, color: '#9ca3af', marginTop: 4 }}>
+                  When a practitioner invites you, they will appear here.
+                </Text>
+              </View>
+            )}
+          </ScrollView>
+        </SafeAreaView>
+      </Modal>
+
+      {/* ============================================ */}
+      {/* MY ASSESSMENTS MODAL */}
+      {/* ============================================ */}
+      <Modal visible={quickModal === 'assessments'} animationType="slide" onRequestClose={() => setQuickModal(null)}>
+        <SafeAreaView style={{ flex: 1, backgroundColor: '#fafafa' }} edges={['top']}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', padding: 16, borderBottomWidth: 1, borderBottomColor: '#f3f4f6', backgroundColor: '#fff' }}>
+            <TouchableOpacity onPress={() => setQuickModal(null)} style={{ padding: 4, marginRight: 12 }}>
+              <ArrowLeft size={24} color="#374151" />
+            </TouchableOpacity>
+            <Text style={{ fontSize: 18, fontWeight: '700', color: '#171717', flex: 1 }}>My Assessments</Text>
+            <Text style={{ fontSize: 13, color: '#9ca3af' }}>{resources.length} total</Text>
+          </View>
+
+          {/* Filter tabs */}
+          <View style={{ flexDirection: 'row', padding: 16, paddingBottom: 0, gap: 8, backgroundColor: '#fff' }}>
+            {([
+              { key: 'all' as const, label: 'All' },
+              { key: 'pending' as const, label: 'To Do' },
+              { key: 'completed' as const, label: 'Completed' },
+            ]).map((tab) => {
+              const active = assessmentFilter === tab.key
+              const count = tab.key === 'all' ? resources.length
+                : tab.key === 'pending' ? resources.filter(r => r.status === 'pending' || r.status === 'in_progress').length
+                : resources.filter(r => r.status === 'completed').length
+              return (
+                <TouchableOpacity
+                  key={tab.key}
+                  onPress={() => setAssessmentFilter(tab.key)}
+                  style={{
+                    paddingHorizontal: 14, paddingVertical: 8, borderRadius: 12,
+                    backgroundColor: active ? '#059669' : '#f3f4f6',
+                  }}
+                >
+                  <Text style={{ fontSize: 13, fontWeight: '600', color: active ? '#fff' : '#6b7280' }}>
+                    {tab.label} ({count})
+                  </Text>
+                </TouchableOpacity>
+              )
+            })}
+          </View>
+
+          <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 40 }}>
+            {(() => {
+              const filtered = assessmentFilter === 'all' ? resources
+                : assessmentFilter === 'pending' ? resources.filter(r => r.status === 'pending' || r.status === 'in_progress')
+                : resources.filter(r => r.status === 'completed')
+
+              if (filtered.length === 0) {
+                return (
+                  <View style={{ alignItems: 'center', paddingVertical: 60 }}>
+                    <FileText size={40} color="#d1d5db" />
+                    <Text style={{ fontSize: 15, fontWeight: '600', color: '#171717', marginTop: 12 }}>
+                      {assessmentFilter === 'completed' ? 'No completed resources yet' : assessmentFilter === 'pending' ? 'All caught up!' : 'No resources yet'}
+                    </Text>
+                    <Text style={{ fontSize: 13, color: '#9ca3af', marginTop: 4 }}>
+                      {assessmentFilter === 'pending' ? 'You have no pending worksheets.' : 'Resources from your practitioner will appear here.'}
+                    </Text>
+                  </View>
+                )
+              }
+
+              return (
+                <View style={{ gap: 10 }}>
+                  {filtered.map((item) => {
+                    const sc = {
+                      pending: { label: 'To do', bg: '#f3f4f6', color: '#6b7280', Icon: FileText },
+                      in_progress: { label: 'In progress', bg: '#fef3c7', color: '#92400e', Icon: Clock },
+                      completed: { label: 'Completed', bg: '#ecfdf5', color: '#059669', Icon: CheckCircle2 },
+                    }[item.status] || { label: 'To do', bg: '#f3f4f6', color: '#6b7280', Icon: FileText }
+
+                    return (
+                      <TouchableOpacity
+                        key={item.id}
+                        activeOpacity={0.7}
+                        onPress={() => { setQuickModal(null); setTimeout(() => setViewingResource(item), 300) }}
+                        style={{
+                          flexDirection: 'row', alignItems: 'center', gap: 12,
+                          backgroundColor: '#fff', borderRadius: 16, padding: 14,
+                          borderWidth: 1, borderColor: '#f3f4f6',
+                          shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.03, shadowRadius: 3, elevation: 1,
+                        }}
+                      >
+                        <LinearGradient
+                          colors={item.status === 'completed' ? ['#a7f3d0', '#6ee7b7'] : ['#fb7185', '#ec4899']}
+                          style={{ width: 44, height: 44, borderRadius: 14, alignItems: 'center', justifyContent: 'center' }}
+                        >
+                          {item.status === 'completed'
+                            ? <CheckCircle2 size={22} color="#059669" />
+                            : <FileText size={22} color="#fff" />
+                          }
+                        </LinearGradient>
+                        <View style={{ flex: 1 }}>
+                          <Text style={{ fontSize: 14, fontWeight: '600', color: '#171717' }} numberOfLines={1}>
+                            {item.title}
+                          </Text>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 4 }}>
+                            <View style={{
+                              flexDirection: 'row', alignItems: 'center', gap: 4,
+                              backgroundColor: sc.bg, borderRadius: 8, paddingHorizontal: 8, paddingVertical: 2,
+                            }}>
+                              <sc.Icon size={12} color={sc.color} />
+                              <Text style={{ fontSize: 11, fontWeight: '500', color: sc.color }}>{sc.label}</Text>
+                            </View>
+                            {item.resourceType && (
+                              <Text style={{ fontSize: 11, color: '#9ca3af', textTransform: 'capitalize' }}>
+                                {item.resourceType.replace(/_/g, ' ')}
+                              </Text>
+                            )}
+                            {item.dueDate && (
+                              <Text style={{ fontSize: 11, color: '#9ca3af' }}>Due {formatDate(item.dueDate)}</Text>
+                            )}
+                          </View>
+                        </View>
+                        <ChevronRight size={18} color="#d1d5db" />
+                      </TouchableOpacity>
+                    )
+                  })}
+                </View>
+              )
+            })()}
+          </ScrollView>
+        </SafeAreaView>
       </Modal>
 
       {/* ============================================ */}
