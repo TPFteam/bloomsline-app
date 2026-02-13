@@ -8,6 +8,8 @@ import {
   ActivityIndicator,
   Image,
   Dimensions,
+  Modal,
+  Pressable,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { LinearGradient } from 'expo-linear-gradient'
@@ -48,6 +50,7 @@ import {
   Bed,
   Music,
   Play,
+  X,
 } from 'lucide-react-native'
 import { useAuth } from '@/lib/auth-context'
 import { supabase } from '@/lib/supabase'
@@ -81,6 +84,7 @@ type MomentItem = {
   type: string
   caption: string | null
   media_url: string | null
+  text_content: string | null
 }
 
 export default function HomeScreen() {
@@ -95,6 +99,7 @@ export default function HomeScreen() {
   const [zoomLevel, setZoomLevel] = useState(1)
   const [centerHour, setCenterHour] = useState(12)
   const [currentTime, setCurrentTime] = useState(new Date())
+  const [viewingMoment, setViewingMoment] = useState<MomentItem | null>(null)
 
   const firstName = member?.first_name || user?.user_metadata?.full_name?.split(' ')[0] || 'Friend'
   const totalSeedLogs = Object.values(anchorLogs).reduce((sum, c) => sum + c, 0)
@@ -121,7 +126,7 @@ export default function HomeScreen() {
     const [momentsRes, anchorsRes, logsRes] = await Promise.all([
       supabase
         .from('moments')
-        .select('id, created_at, moods, type, caption, media_url')
+        .select('id, created_at, moods, type, caption, media_url, text_content')
         .eq('user_id', user.id)
         .gte('created_at', dayStart.toISOString())
         .lte('created_at', dayEnd.toISOString())
@@ -450,8 +455,10 @@ export default function HomeScreen() {
                     const isPhoto = m.type === 'photo' && m.media_url
 
                     return (
-                      <View
+                      <TouchableOpacity
                         key={m.id}
+                        activeOpacity={0.8}
+                        onPress={() => setViewingMoment(m)}
                         style={{
                           position: 'absolute',
                           left: `${x}%`, top: `${y}%`,
@@ -487,7 +494,7 @@ export default function HomeScreen() {
                             <MoodIcon mood={m.moods?.[0]} />
                           </LinearGradient>
                         )}
-                      </View>
+                      </TouchableOpacity>
                     )
                   })
                 ) : (
@@ -670,6 +677,112 @@ export default function HomeScreen() {
           </View>
         </ScrollView>
       </SafeAreaView>
+
+      {/* Moment Lightbox */}
+      <Modal visible={!!viewingMoment} transparent animationType="fade" onRequestClose={() => setViewingMoment(null)}>
+        {viewingMoment && (() => {
+          const moodColors = getMoodColors(viewingMoment.moods?.[0])
+          const time = new Date(viewingMoment.created_at)
+          const timeStr = time.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+          const hasImage = viewingMoment.type === 'photo' && viewingMoment.media_url
+
+          return hasImage ? (
+            /* Photo lightbox — dark backdrop */
+            <Pressable
+              style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.9)', justifyContent: 'center', alignItems: 'center' }}
+              onPress={() => setViewingMoment(null)}
+            >
+              <Pressable onPress={() => {}} style={{ width: '90%', maxWidth: 400 }}>
+                <TouchableOpacity
+                  onPress={() => setViewingMoment(null)}
+                  style={{
+                    alignSelf: 'flex-end', marginBottom: 12,
+                    width: 36, height: 36, borderRadius: 18,
+                    backgroundColor: 'rgba(255,255,255,0.15)',
+                    alignItems: 'center', justifyContent: 'center',
+                  }}
+                >
+                  <X size={20} color="#fff" />
+                </TouchableOpacity>
+                <Image
+                  source={{ uri: viewingMoment.media_url! }}
+                  style={{ width: '100%', aspectRatio: 3 / 4, borderRadius: 16, marginBottom: 16 }}
+                  resizeMode="cover"
+                />
+                <View style={{ alignItems: 'center' }}>
+                  {viewingMoment.moods?.[0] && (
+                    <Text style={{ color: '#fff', fontSize: 18, fontWeight: '700', textTransform: 'capitalize', marginBottom: 4 }}>
+                      {viewingMoment.moods[0]}
+                    </Text>
+                  )}
+                  {viewingMoment.caption && (
+                    <Text style={{ color: 'rgba(255,255,255,0.8)', fontSize: 15, textAlign: 'center', marginBottom: 4 }}>
+                      {viewingMoment.caption}
+                    </Text>
+                  )}
+                  <Text style={{ color: 'rgba(255,255,255,0.5)', fontSize: 13 }}>{timeStr}</Text>
+                </View>
+              </Pressable>
+            </Pressable>
+          ) : (
+            /* Text/mood moment — white card */
+            <Pressable
+              style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'center', alignItems: 'center' }}
+              onPress={() => setViewingMoment(null)}
+            >
+              <Pressable onPress={() => {}} style={{
+                width: '85%', maxWidth: 380, backgroundColor: '#fff',
+                borderRadius: 20, padding: 24,
+                shadowColor: '#000', shadowOffset: { width: 0, height: 8 },
+                shadowOpacity: 0.15, shadowRadius: 24, elevation: 10,
+              }}>
+                {/* Mood badge */}
+                {viewingMoment.moods?.[0] && (
+                  <LinearGradient
+                    colors={[moodColors.from, moodColors.to]}
+                    style={{
+                      alignSelf: 'flex-start', borderRadius: 16,
+                      paddingHorizontal: 14, paddingVertical: 6, marginBottom: 16,
+                    }}
+                  >
+                    <Text style={{ color: '#fff', fontSize: 14, fontWeight: '600', textTransform: 'capitalize' }}>
+                      {viewingMoment.moods[0]}
+                    </Text>
+                  </LinearGradient>
+                )}
+
+                {/* Text content */}
+                {viewingMoment.text_content && (
+                  <Text style={{ fontSize: 16, color: '#171717', lineHeight: 24, marginBottom: 12 }}>
+                    {viewingMoment.text_content}
+                  </Text>
+                )}
+
+                {/* Caption */}
+                {viewingMoment.caption && (
+                  <Text style={{ fontSize: 15, color: '#6b7280', marginBottom: 12 }}>
+                    {viewingMoment.caption}
+                  </Text>
+                )}
+
+                {/* Time */}
+                <Text style={{ fontSize: 13, color: '#9ca3af', marginBottom: 20 }}>{timeStr}</Text>
+
+                {/* Close button */}
+                <TouchableOpacity
+                  onPress={() => setViewingMoment(null)}
+                  style={{
+                    backgroundColor: '#f3f4f6', borderRadius: 12,
+                    paddingVertical: 14, alignItems: 'center',
+                  }}
+                >
+                  <Text style={{ fontSize: 15, fontWeight: '600', color: '#374151' }}>Close</Text>
+                </TouchableOpacity>
+              </Pressable>
+            </Pressable>
+          )
+        })()}
+      </Modal>
     </LinearGradient>
   )
 }
@@ -709,11 +822,11 @@ function getMoodColors(mood?: string | null): { from: string; to: string } {
   return MOOD_COLORS[mood] ?? { from: '#e5e7eb', to: '#d1d5db' }
 }
 
-function MoodIcon({ mood }: { mood?: string | null }) {
+function MoodIcon({ mood, size = 14 }: { mood?: string | null; size?: number }) {
   const ICONS: Record<string, any> = {
     grateful: Heart, joyful: Sun, inspired: Sparkles, loved: Heart,
     peaceful: Circle, calm: Circle, hopeful: Sparkles, proud: Sparkles,
   }
   const Icon = mood ? ICONS[mood] || Sun : Sun
-  return <Icon size={14} color="#ffffff" strokeWidth={2.5} />
+  return <Icon size={size} color="#ffffff" strokeWidth={2.5} />
 }
