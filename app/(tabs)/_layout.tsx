@@ -20,24 +20,29 @@ const menuItems = [
 function FloatingCameraButton() {
   const router = useRouter()
   const insets = useSafeAreaInsets()
-  const bounce = useRef(new Animated.Value(0)).current
+  const tilt = useRef(new Animated.Value(0)).current
 
   useEffect(() => {
     Animated.loop(
       Animated.sequence([
-        Animated.timing(bounce, { toValue: -6, duration: 1200, useNativeDriver: true }),
-        Animated.timing(bounce, { toValue: 0, duration: 1200, useNativeDriver: true }),
+        Animated.timing(tilt, { toValue: 1, duration: 1000, useNativeDriver: true }),
+        Animated.timing(tilt, { toValue: -1, duration: 1000, useNativeDriver: true }),
+        Animated.timing(tilt, { toValue: 0, duration: 800, useNativeDriver: true }),
       ])
     ).start()
-  }, [bounce])
+  }, [tilt])
+
+  const rotate = tilt.interpolate({
+    inputRange: [-1, 0, 1],
+    outputRange: ['-8deg', '0deg', '8deg'],
+  })
 
   return (
-    <Animated.View style={{
+    <View style={{
       position: 'absolute',
       bottom: Math.max(insets.bottom, 16) + 68,
       right: 24,
       zIndex: 100,
-      transform: [{ translateY: bounce }],
     }}>
       <TouchableOpacity
         onPress={() => router.push('/capture')}
@@ -54,13 +59,13 @@ function FloatingCameraButton() {
           shadowOpacity: 0.35,
           shadowRadius: 12,
           elevation: 10,
-          borderWidth: 3,
-          borderColor: '#fff',
         }}
       >
-        <Camera size={24} color="#ffffff" />
+        <Animated.View style={{ transform: [{ rotate }] }}>
+          <Camera size={24} color="#ffffff" />
+        </Animated.View>
       </TouchableOpacity>
-    </Animated.View>
+    </View>
   )
 }
 
