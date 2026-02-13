@@ -12,7 +12,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { LinearGradient } from 'expo-linear-gradient'
 import { useFocusEffect, useRouter } from 'expo-router'
-import Svg, { Line } from 'react-native-svg'
+import Svg, { Path } from 'react-native-svg'
 import {
   Bell,
   Clock,
@@ -405,6 +405,35 @@ export default function HomeScreen() {
                   />
                 )}
 
+                {/* Moment connecting curve (rendered behind orbs) */}
+                {moments.length > 1 && (
+                  <Svg style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, width: '100%', height: '100%' }} pointerEvents="none">
+                    <Path
+                      d={moments.reduce((path, m, i) => {
+                        const t = new Date(m.created_at)
+                        const xPct = hourToPosition(t.getHours() + t.getMinutes() / 60)
+                        const x = (xPct / 100) * flowWidth
+                        const score = m.moods?.[0] ? getMoodScore(m.moods[0]) : 60
+                        const y = (1 - ((score / 100) * 0.7 + 0.15)) * 160
+                        if (i === 0) return `M ${x} ${y}`
+                        const prevM = moments[i - 1]!
+                        const prevT = new Date(prevM.created_at)
+                        const prevXPct = hourToPosition(prevT.getHours() + prevT.getMinutes() / 60)
+                        const prevX = (prevXPct / 100) * flowWidth
+                        const prevScore = prevM.moods?.[0] ? getMoodScore(prevM.moods[0]) : 60
+                        const prevY = (1 - ((prevScore / 100) * 0.7 + 0.15)) * 160
+                        const cpX = (prevX + x) / 2
+                        return `${path} C ${cpX} ${prevY}, ${cpX} ${y}, ${x} ${y}`
+                      }, '')}
+                      stroke="#10b981"
+                      strokeWidth={2}
+                      opacity={0.4}
+                      fill="none"
+                      strokeLinecap="round"
+                    />
+                  </Svg>
+                )}
+
                 {/* Moment orbs on timeline */}
                 {moments.length > 0 ? (
                   moments.map((m) => {
@@ -426,7 +455,7 @@ export default function HomeScreen() {
                         style={{
                           position: 'absolute',
                           left: `${x}%`, top: `${y}%`,
-                          marginLeft: isPhoto ? -16 : -16,
+                          marginLeft: -16,
                           marginTop: isPhoto ? -20 : -16,
                         }}
                       >
@@ -474,27 +503,6 @@ export default function HomeScreen() {
                     <Text style={{ fontSize: 14, color: '#9ca3af' }}>No moments yet</Text>
                     <Text style={{ fontSize: 12, color: '#d1d5db', marginTop: 2 }}>Capture your first moment</Text>
                   </View>
-                )}
-
-                {/* Moment connecting line */}
-                {moments.length > 1 && (
-                  <Svg style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, width: '100%', height: '100%' }}>
-                    {moments.slice(0, -1).map((m, i) => {
-                      const next = moments[i + 1]!
-                      const t1 = new Date(m.created_at)
-                      const t2 = new Date(next.created_at)
-                      const x1 = (hourToPosition(t1.getHours() + t1.getMinutes() / 60) / 100) * flowWidth
-                      const x2 = (hourToPosition(t2.getHours() + t2.getMinutes() / 60) / 100) * flowWidth
-                      const s1 = m.moods?.[0] ? getMoodScore(m.moods[0]) : 60
-                      const s2 = next.moods?.[0] ? getMoodScore(next.moods[0]) : 60
-                      const y1 = (1 - ((s1 / 100) * 0.7 + 0.15)) * 160
-                      const y2 = (1 - ((s2 / 100) * 0.7 + 0.15)) * 160
-                      return (
-                        <Line key={i} x1={x1} y1={y1} x2={x2} y2={y2}
-                          stroke="#10b981" strokeWidth={2} opacity={0.5} />
-                      )
-                    })}
-                  </Svg>
                 )}
               </View>
 
