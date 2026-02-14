@@ -665,7 +665,7 @@ function MoodLandscapeHero({
               <View style={{
                 width: size, height: size, borderRadius: size / 2,
                 backgroundColor: color,
-                opacity: day.moments.length === 0 ? 0.3 : 1,
+                opacity: day.moments.length === 0 ? 0.4 : 1,
               }} />
             </View>
           )
@@ -678,7 +678,7 @@ function MoodLandscapeHero({
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 0 }}
         style={{
-          height: 4, borderRadius: 2, marginBottom: 14, opacity: 0.6,
+          height: 4, borderRadius: 2, marginBottom: 14, opacity: 0.85,
         }}
       />
 
@@ -768,7 +768,7 @@ function RevisitCard({
       backgroundColor: theme.cardBg,
       borderWidth: 1, borderColor: theme.cardBorder,
     }}>
-      <Text style={{ fontSize: 12, color: theme.textFaint, fontWeight: '500', letterSpacing: 0.5, marginBottom: 10 }}>
+      <Text style={{ fontSize: 12, color: theme.textMuted, fontWeight: '600', letterSpacing: 0.5, marginBottom: 10 }}>
         REMEMBER THIS?
       </Text>
 
@@ -1429,18 +1429,18 @@ export default function MomentsScreen() {
 
   // Theme
   const theme = {
-    bg: isDark ? '#0c0c0e' : '#f8f7f4',
-    text: isDark ? '#ffffff' : '#111827',
-    textMuted: isDark ? 'rgba(255,255,255,0.5)' : '#6b7280',
-    textFaint: isDark ? 'rgba(255,255,255,0.3)' : '#9ca3af',
+    bg: isDark ? '#0c0c0e' : '#f5f3ef',
+    text: isDark ? '#ffffff' : '#1a1a1a',
+    textMuted: isDark ? 'rgba(255,255,255,0.5)' : '#4b5563',
+    textFaint: isDark ? 'rgba(255,255,255,0.3)' : '#6b7280',
     cardBg: isDark ? 'rgba(255,255,255,0.04)' : '#ffffff',
-    cardBorder: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)',
-    toggleBg: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.05)',
-    accentBg: isDark ? '#ffffff' : '#111827',
+    cardBorder: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)',
+    toggleBg: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.06)',
+    accentBg: isDark ? '#ffffff' : '#1a1a1a',
     accentText: isDark ? '#000000' : '#ffffff',
     divider: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)',
-    moodTagBg: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.05)',
-    moodTagText: isDark ? 'rgba(255,255,255,0.5)' : '#6b7280',
+    moodTagBg: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.06)',
+    moodTagText: isDark ? 'rgba(255,255,255,0.5)' : '#4b5563',
     voiceGrad1: isDark ? 'rgba(139,92,246,0.2)' : 'rgba(221,214,254,1)',
     voiceGrad2: isDark ? 'rgba(124,58,237,0.2)' : 'rgba(233,213,255,1)',
     voiceBar: isDark ? 'rgba(167,139,250,0.6)' : 'rgba(139,92,246,0.5)',
