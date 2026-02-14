@@ -35,6 +35,7 @@ export interface RitualCompletion {
   member_id: string
   completion_date: string
   completed: boolean
+  completed_at: string | null
   duration_minutes: number | null
   notes: string | null
   mood: string | null

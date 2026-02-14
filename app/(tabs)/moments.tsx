@@ -19,8 +19,8 @@ import {
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { LinearGradient } from 'expo-linear-gradient'
-import ViewShot, { captureRef } from 'react-native-view-shot'
 import * as Sharing from 'expo-sharing'
+import { captureRef } from 'react-native-view-shot'
 import { useRouter, useFocusEffect } from 'expo-router'
 import {
   Plus,
@@ -605,7 +605,8 @@ function EmotionAnalyticsModal({
 }) {
   const { height: screenHeight } = Dimensions.get('window')
   const [selectedMoodRing, setSelectedMoodRing] = useState<string | null>(null)
-  const summaryCardRef = useRef<any>(null)
+  const [isSharing, setIsSharing] = useState(false)
+  const summaryCardRef = useRef<View>(null)
 
   // ---- All mood counts ----
   const moodCounts = useMemo(() => {
@@ -808,6 +809,37 @@ function EmotionAnalyticsModal({
     return [c1, c2]
   }, [sortedMoods])
 
+  // ---- Shareable insight quote ----
+  const shareQuote = useMemo(() => {
+    const topMood = sortedMoods[0]?.[0]
+    const totalMoments = moments.length
+    const activeDays = new Set(moments.map(m => getDateKey(new Date(m.created_at)))).size
+
+    const quotes: string[] = []
+
+    if (uniqueMoodCount >= 5)
+      quotes.push(`I've named ${uniqueMoodCount} different emotions. That's not overthinking — that's emotional fluency.`)
+    if (topMood && POSITIVE_MOODS.includes(topMood))
+      quotes.push(`My most felt emotion lately? ${topMood.charAt(0).toUpperCase() + topMood.slice(1)}. And I think that says something beautiful.`)
+    if (topMood && !POSITIVE_MOODS.includes(topMood))
+      quotes.push(`I've been sitting with ${topMood} a lot lately. Naming it is the first step to understanding it.`)
+    if (activeDays >= 7)
+      quotes.push(`${activeDays} days of showing up for myself. Consistency is its own kind of courage.`)
+    if (totalMoments >= 50)
+      quotes.push(`${totalMoments} moments captured. That's ${totalMoments} times I chose to pay attention to how I feel.`)
+    if (streakData.current >= 3)
+      quotes.push(`${streakData.current}-day positivity streak. Not forcing it — just noticing the good.`)
+    if (uniqueMoodCount >= 3 && uniqueMoodCount < 5)
+      quotes.push(`${uniqueMoodCount} emotions, all valid. My emotional vocabulary is growing.`)
+
+    // Fallback
+    if (quotes.length === 0)
+      quotes.push('Every feeling I name makes me a little stronger.')
+
+    // Pick one deterministically based on moment count
+    return quotes[totalMoments % quotes.length]
+  }, [moments, sortedMoods, uniqueMoodCount, streakData])
+
   // ---- Mood by capture type ----
   const typeData = useMemo(() => {
     const types = ['photo', 'video', 'voice', 'write']
@@ -901,7 +933,7 @@ function EmotionAnalyticsModal({
               showsVerticalScrollIndicator={false}
             >
               {/* === Summary Hero === */}
-              <ViewShot ref={summaryCardRef} options={{ format: 'png', quality: 1 }}>
+              <View ref={summaryCardRef} collapsable={false}>
                 <LinearGradient
                   colors={[`${summaryGradient[0]}22`, `${summaryGradient[1]}22`]}
                   start={{ x: 0, y: 0 }}
@@ -915,8 +947,36 @@ function EmotionAnalyticsModal({
                   }}>
                     {summary}
                   </Text>
+
+                  {/* Shareable quote */}
+                  <View style={{
+                    marginTop: 18, paddingTop: 16,
+                    borderTopWidth: 1,
+                    borderTopColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)',
+                  }}>
+                    <Text style={{
+                      fontSize: 15, lineHeight: 22, fontWeight: '600', fontStyle: 'italic',
+                      color: isDark ? 'rgba(255,255,255,0.75)' : '#374151',
+                    }}>
+                      "{shareQuote}"
+                    </Text>
+                  </View>
+
+                  {/* Watermark */}
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 16 }}>
+                    <View style={{
+                      width: 6, height: 6, borderRadius: 3,
+                      backgroundColor: summaryGradient[0],
+                    }} />
+                    <Text style={{
+                      fontSize: 11, fontWeight: '600', letterSpacing: 0.5,
+                      color: isDark ? 'rgba(255,255,255,0.25)' : 'rgba(0,0,0,0.2)',
+                    }}>
+                      bloomsline
+                    </Text>
+                  </View>
                 </LinearGradient>
-              </ViewShot>
+              </View>
 
               {/* CTAs */}
               <View style={{ flexDirection: 'row', gap: 10, marginBottom: 36 }}>
@@ -943,18 +1003,24 @@ function EmotionAnalyticsModal({
                 <TouchableOpacity
                   activeOpacity={0.8}
                   onPress={async () => {
+                    if (isSharing) return
+                    setIsSharing(true)
                     try {
-                      if (summaryCardRef.current) {
-                        const uri = await captureRef(summaryCardRef, { format: 'png', quality: 1 })
-                        const isAvailable = await Sharing.isAvailableAsync()
-                        if (isAvailable) {
-                          await Sharing.shareAsync(uri)
-                        } else {
-                          await Share.share({ message: summary })
-                        }
-                      }
-                    } catch {
-                      await Share.share({ message: summary })
+                      const uri = await captureRef(summaryCardRef, {
+                        format: 'png',
+                        quality: 1,
+                        result: 'tmpfile',
+                      })
+                      console.log('Captured image at:', uri)
+                      await Sharing.shareAsync('file://' + uri, {
+                        mimeType: 'image/png',
+                        UTI: 'public.png',
+                      })
+                    } catch (e) {
+                      console.log('Share image failed:', e)
+                      await Share.share({ message: `${summary}\n\n"${shareQuote}"\n\n— bloomsline` })
+                    } finally {
+                      setIsSharing(false)
                     }
                   }}
                   style={{
