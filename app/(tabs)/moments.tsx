@@ -580,15 +580,557 @@ function BloomChatModal({ isOpen, onClose, isDark }: { isOpen: boolean; onClose:
 }
 
 // ============================================
+// Emotion Analytics Modal — "Your Emotional Story"
+// ============================================
+
+function EmotionAnalyticsModal({
+  isOpen,
+  onClose,
+  isDark,
+  moments,
+  theme,
+}: {
+  isOpen: boolean
+  onClose: () => void
+  isDark: boolean
+  moments: Moment[]
+  theme: Record<string, string>
+}) {
+  const { height: screenHeight } = Dimensions.get('window')
+
+  // ---- All mood counts ----
+  const moodCounts = useMemo(() => {
+    const counts: Record<string, number> = {}
+    moments.forEach(m => {
+      m.moods?.forEach(mood => { counts[mood] = (counts[mood] || 0) + 1 })
+    })
+    return counts
+  }, [moments])
+
+  const sortedMoods = useMemo(() =>
+    Object.entries(moodCounts).sort((a, b) => b[1] - a[1]),
+    [moodCounts]
+  )
+  const uniqueMoodCount = Object.keys(moodCounts).length
+
+  // ---- 4-week emotion river ----
+  const weeklyMoodData = useMemo(() => {
+    const now = new Date()
+    const weeks: { label: string; moodCounts: Record<string, number>; total: number }[] = []
+
+    for (let w = 0; w < 4; w++) {
+      const weekEnd = new Date(now)
+      weekEnd.setDate(weekEnd.getDate() - (w * 7))
+      weekEnd.setHours(23, 59, 59, 999)
+      const weekStart = new Date(weekEnd)
+      weekStart.setDate(weekStart.getDate() - 6)
+      weekStart.setHours(0, 0, 0, 0)
+
+      const label = w === 0 ? 'This Week' : w === 1 ? 'Last Week' : `${w} Weeks Ago`
+      const weekMoments = moments.filter(m => {
+        const d = new Date(m.created_at)
+        return d >= weekStart && d <= weekEnd
+      })
+
+      const counts: Record<string, number> = {}
+      weekMoments.forEach(m => {
+        m.moods?.forEach(mood => { counts[mood] = (counts[mood] || 0) + 1 })
+      })
+      const total = Object.values(counts).reduce((a, b) => a + b, 0)
+
+      weeks.push({ label, moodCounts: counts, total })
+    }
+
+    return weeks
+  }, [moments])
+
+  // ---- Positive streaks ----
+  const streakData = useMemo(() => {
+    const byDate: Record<string, Moment[]> = {}
+    moments.forEach(m => {
+      const key = getDateKey(new Date(m.created_at))
+      if (!byDate[key]) byDate[key] = []
+      byDate[key].push(m)
+    })
+
+    // Current: walk backwards from today
+    let current = 0
+    const d = new Date()
+    for (let i = 0; i < 365; i++) {
+      const key = getDateKey(d)
+      const dayMoments = byDate[key]
+      if (!dayMoments || dayMoments.length === 0) break
+      const posCount = dayMoments.filter(m =>
+        m.moods?.some(mood => POSITIVE_MOODS.includes(mood))
+      ).length
+      if (posCount / dayMoments.length >= 0.5) {
+        current++
+      } else {
+        break
+      }
+      d.setDate(d.getDate() - 1)
+    }
+
+    // Longest: walk through sorted dates
+    const dates = Object.keys(byDate).sort()
+    let longest = 0
+    let run = 0
+    for (let i = 0; i < dates.length; i++) {
+      const dayMoments = byDate[dates[i]]
+      const posCount = dayMoments.filter(m =>
+        m.moods?.some(mood => POSITIVE_MOODS.includes(mood))
+      ).length
+      const isPositive = posCount / dayMoments.length >= 0.5
+
+      let isConsecutive = true
+      if (i > 0) {
+        const prev = new Date(dates[i - 1])
+        const curr = new Date(dates[i])
+        const diff = Math.round((curr.getTime() - prev.getTime()) / 86400000)
+        if (diff > 1) isConsecutive = false
+      }
+
+      if (isPositive && (i === 0 || isConsecutive)) {
+        run++
+        longest = Math.max(longest, run)
+      } else if (isPositive) {
+        run = 1
+      } else {
+        run = 0
+      }
+    }
+
+    return { current, longest }
+  }, [moments])
+
+  // ---- Top 3 brightest days ----
+  const topDays = useMemo(() => {
+    const byDate: Record<string, Moment[]> = {}
+    moments.forEach(m => {
+      const key = getDateKey(new Date(m.created_at))
+      if (!byDate[key]) byDate[key] = []
+      byDate[key].push(m)
+    })
+
+    return Object.entries(byDate)
+      .map(([date, dayMoments]) => {
+        const posCount = dayMoments.filter(m =>
+          m.moods?.some(mood => POSITIVE_MOODS.includes(mood))
+        ).length
+        const score = posCount / dayMoments.length
+        const dominant = getDominantMood(dayMoments)
+        const snippet = dayMoments[0]?.text_content || dayMoments[0]?.caption || ''
+        return { date, score, count: dayMoments.length, dominant, snippet }
+      })
+      .filter(d => d.score > 0)
+      .sort((a, b) => b.score - a.score || b.count - a.count)
+      .slice(0, 3)
+  }, [moments])
+
+  // ---- Time of day buckets ----
+  const timeBuckets = useMemo(() => {
+    const buckets = [
+      { label: 'Morning', hours: [5, 6, 7, 8, 9, 10, 11], moments: [] as Moment[], moodCounts: {} as Record<string, number> },
+      { label: 'Afternoon', hours: [12, 13, 14, 15, 16], moments: [] as Moment[], moodCounts: {} as Record<string, number> },
+      { label: 'Evening', hours: [17, 18, 19, 20], moments: [] as Moment[], moodCounts: {} as Record<string, number> },
+      { label: 'Night', hours: [21, 22, 23, 0, 1, 2, 3, 4], moments: [] as Moment[], moodCounts: {} as Record<string, number> },
+    ]
+
+    moments.forEach(m => {
+      const h = new Date(m.created_at).getHours()
+      const bucket = buckets.find(b => b.hours.includes(h))
+      if (bucket) {
+        bucket.moments.push(m)
+        m.moods?.forEach(mood => {
+          bucket.moodCounts[mood] = (bucket.moodCounts[mood] || 0) + 1
+        })
+      }
+    })
+
+    return buckets
+  }, [moments])
+
+  const peakBucketIndex = useMemo(() => {
+    let maxCount = 0
+    let maxIdx = 0
+    timeBuckets.forEach((b, i) => {
+      if (b.moments.length > maxCount) {
+        maxCount = b.moments.length
+        maxIdx = i
+      }
+    })
+    return maxIdx
+  }, [timeBuckets])
+
+  // ---- Mood by capture type ----
+  const typeData = useMemo(() => {
+    const types = ['photo', 'video', 'voice', 'write']
+    return types.map(type => {
+      const typeMoments = moments.filter(m => m.type === type)
+      const counts: Record<string, number> = {}
+      typeMoments.forEach(m => {
+        m.moods?.forEach(mood => { counts[mood] = (counts[mood] || 0) + 1 })
+      })
+      const total = Object.values(counts).reduce((a, b) => a + b, 0)
+      const topMood = Object.entries(counts).sort((a, b) => b[1] - a[1])[0]?.[0]
+      return { type, count: typeMoments.length, moodCounts: counts, total, topMood }
+    }).filter(t => t.count > 0)
+  }, [moments])
+
+  // ---- Summary text ----
+  const summary = useMemo(() => {
+    const activeDays = new Set(moments.map(m => getDateKey(new Date(m.created_at)))).size
+    const topMood = sortedMoods[0]?.[0]
+    const totalMoments = moments.length
+
+    const typeCounts: Record<string, number> = {}
+    moments.forEach(m => { typeCounts[m.type] = (typeCounts[m.type] || 0) + 1 })
+    const favoriteType = Object.entries(typeCounts).sort((a, b) => b[1] - a[1])[0]?.[0]
+
+    const peakTime = timeBuckets[peakBucketIndex]?.label.toLowerCase()
+    const typeVerb: Record<string, string> = {
+      photo: 'photograph', video: 'film', voice: 'record', write: 'write about',
+    }
+
+    let text = `Over ${activeDays} day${activeDays !== 1 ? 's' : ''}, you've captured ${totalMoments} moment${totalMoments !== 1 ? 's' : ''}`
+    if (topMood) text += `, with ${topMood} leading the way`
+    text += '. '
+    if (favoriteType && peakTime) {
+      text += `You love to ${typeVerb[favoriteType] || favoriteType} your feelings, especially in the ${peakTime}. `
+    }
+    if (uniqueMoodCount >= 5) {
+      text += `Naming ${uniqueMoodCount} different emotions is a quiet superpower.`
+    } else if (uniqueMoodCount >= 3) {
+      text += `You're building a beautiful emotional vocabulary.`
+    }
+
+    return text
+  }, [moments, sortedMoods, timeBuckets, peakBucketIndex, uniqueMoodCount])
+
+  const summaryGradient = useMemo<[string, string]>(() => {
+    const c1 = MOOD_COLORS[sortedMoods[0]?.[0]] || '#10b981'
+    const c2 = MOOD_COLORS[sortedMoods[1]?.[0]] || '#14b8a6'
+    return [c1, c2]
+  }, [sortedMoods])
+
+  // ---- Section header helper ----
+  const sectionHeader = (title: string, subtitle: string) => (
+    <View style={{ marginBottom: 14 }}>
+      <Text style={{ fontSize: 17, fontWeight: '700', color: isDark ? '#ffffff' : '#111827' }}>
+        {title}
+      </Text>
+      <Text style={{ fontSize: 13, color: isDark ? 'rgba(255,255,255,0.4)' : '#9ca3af', marginTop: 2, fontStyle: 'italic' }}>
+        {subtitle}
+      </Text>
+    </View>
+  )
+
+  const typeVerbs: Record<string, string> = {
+    photo: 'capture photos', video: 'record videos', voice: 'leave voice notes', write: 'write',
+  }
+
+  return (
+    <Modal visible={isOpen} transparent animationType="slide" onRequestClose={onClose}>
+      <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.4)' }} onPress={onClose}>
+        <View style={{ flex: 1 }} />
+        <Pressable onPress={() => {}} style={{
+          height: screenHeight * 0.85,
+          backgroundColor: isDark ? '#1a1a1c' : '#ffffff',
+          borderTopLeftRadius: 28, borderTopRightRadius: 28,
+          overflow: 'hidden',
+          shadowColor: '#000', shadowOffset: { width: 0, height: -8 },
+          shadowOpacity: 0.25, shadowRadius: 20, elevation: 20,
+        }}>
+          {/* Handle bar */}
+          <View style={{ alignItems: 'center', paddingTop: 10, paddingBottom: 4 }}>
+            <View style={{
+              width: 36, height: 4, borderRadius: 2,
+              backgroundColor: isDark ? 'rgba(255,255,255,0.2)' : 'rgba(0,0,0,0.12)',
+            }} />
+          </View>
+
+          {/* Header */}
+          <View style={{
+            flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+            paddingHorizontal: 20, paddingTop: 8, paddingBottom: 14,
+            borderBottomWidth: 1,
+            borderBottomColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)',
+          }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+              <Sparkles size={20} color={isDark ? '#f59e0b' : '#d97706'} />
+              <Text style={{ fontSize: 18, fontWeight: '700', color: isDark ? '#ffffff' : '#111827' }}>
+                Your Emotional Story
+              </Text>
+            </View>
+            <TouchableOpacity
+              onPress={onClose}
+              style={{
+                width: 34, height: 34, borderRadius: 17,
+                alignItems: 'center', justifyContent: 'center',
+                backgroundColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.05)',
+              }}
+            >
+              <X size={18} color={isDark ? 'rgba(255,255,255,0.6)' : '#9ca3af'} />
+            </TouchableOpacity>
+          </View>
+
+          {moments.length < 3 ? (
+            <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 40 }}>
+              <Sparkles size={40} color={isDark ? 'rgba(255,255,255,0.2)' : '#d1d5db'} />
+              <Text style={{
+                fontSize: 16, fontWeight: '600', textAlign: 'center', marginTop: 16, lineHeight: 22,
+                color: isDark ? 'rgba(255,255,255,0.6)' : '#6b7280',
+              }}>
+                Keep capturing moments — your story is still taking shape.
+              </Text>
+            </View>
+          ) : (
+            <ScrollView
+              style={{ flex: 1 }}
+              contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 24, paddingBottom: 50 }}
+              showsVerticalScrollIndicator={false}
+            >
+              {/* === 1. Your Emotional Palette === */}
+              {sectionHeader('Your Emotional Palette', 'Every feeling you\'ve honored.')}
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 8 }}>
+                {sortedMoods.map(([mood, count]) => {
+                  const size = Math.min(28 + Math.log2(count) * 8, 56)
+                  return (
+                    <View key={mood} style={{
+                      width: size, height: size, borderRadius: size / 2,
+                      backgroundColor: MOOD_COLORS[mood] || '#6b7280',
+                      alignItems: 'center', justifyContent: 'center',
+                    }}>
+                      <Text style={{
+                        fontSize: size < 36 ? 7 : 9, fontWeight: '600',
+                        color: '#ffffff', textTransform: 'capitalize', textAlign: 'center',
+                      }} numberOfLines={1}>
+                        {mood}
+                      </Text>
+                    </View>
+                  )
+                })}
+              </View>
+              <Text style={{ fontSize: 12, color: theme.textFaint, marginBottom: 28 }}>
+                You've named {uniqueMoodCount} different emotion{uniqueMoodCount !== 1 ? 's' : ''} across {moments.length} moments.
+              </Text>
+
+              {/* === 2. Emotion River — 4 Weeks === */}
+              {sectionHeader('How You\'ve Been Feeling', 'Your emotional flow, week by week.')}
+              <View style={{ gap: 10, marginBottom: 28 }}>
+                {weeklyMoodData.map((week, i) => (
+                  <View key={i}>
+                    <Text style={{ fontSize: 11, color: theme.textFaint, marginBottom: 4, fontWeight: '500' }}>
+                      {week.label}
+                    </Text>
+                    {week.total === 0 ? (
+                      <View style={{
+                        height: 20, borderRadius: 10,
+                        borderWidth: 1, borderStyle: 'dashed',
+                        borderColor: isDark ? 'rgba(255,255,255,0.15)' : 'rgba(0,0,0,0.12)',
+                        alignItems: 'center', justifyContent: 'center',
+                      }}>
+                        <Text style={{ fontSize: 10, color: theme.textFaint }}>No moments this week</Text>
+                      </View>
+                    ) : (
+                      <View style={{ flexDirection: 'row', height: 20, borderRadius: 10, overflow: 'hidden' }}>
+                        {Object.entries(week.moodCounts)
+                          .sort((a, b) => b[1] - a[1])
+                          .map(([mood, count]) => (
+                            <View key={mood} style={{
+                              flex: count / week.total, minWidth: 4,
+                              backgroundColor: MOOD_COLORS[mood] || '#6b7280',
+                            }} />
+                          ))}
+                      </View>
+                    )}
+                  </View>
+                ))}
+              </View>
+
+              {/* === 3. Brightest Days === */}
+              {sectionHeader('Your Brightest Days', 'The days you shined.')}
+              <View style={{ flexDirection: 'row', gap: 10, marginBottom: 12 }}>
+                <View style={{
+                  flex: 1, paddingVertical: 10, paddingHorizontal: 14, borderRadius: 14,
+                  backgroundColor: theme.toggleBg,
+                }}>
+                  <Text style={{ fontSize: 20, fontWeight: '700', color: isDark ? '#ffffff' : '#111827' }}>
+                    {streakData.current}
+                  </Text>
+                  <Text style={{ fontSize: 11, color: theme.textFaint, marginTop: 2 }}>Current streak</Text>
+                </View>
+                <View style={{
+                  flex: 1, paddingVertical: 10, paddingHorizontal: 14, borderRadius: 14,
+                  backgroundColor: theme.toggleBg,
+                }}>
+                  <Text style={{ fontSize: 20, fontWeight: '700', color: isDark ? '#ffffff' : '#111827' }}>
+                    {streakData.longest}
+                  </Text>
+                  <Text style={{ fontSize: 11, color: theme.textFaint, marginTop: 2 }}>Longest streak</Text>
+                </View>
+              </View>
+              {topDays.length > 0 && (
+                <ScrollView
+                  horizontal showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={{ gap: 10, paddingBottom: 4 }}
+                  style={{ marginBottom: 28 }}
+                >
+                  {topDays.map(day => {
+                    const moodColor = day.dominant ? (MOOD_COLORS[day.dominant] || '#6b7280') : theme.textFaint
+                    const dateObj = new Date(day.date + 'T12:00:00')
+                    return (
+                      <View key={day.date} style={{
+                        width: 160, borderRadius: 16, padding: 14,
+                        backgroundColor: theme.cardBg, borderWidth: 2, borderColor: moodColor,
+                      }}>
+                        <Text style={{ fontSize: 13, fontWeight: '600', color: isDark ? '#ffffff' : '#111827' }}>
+                          {dateObj.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' })}
+                        </Text>
+                        <Text style={{ fontSize: 11, color: theme.textFaint, marginTop: 4 }}>
+                          {day.count} moment{day.count !== 1 ? 's' : ''}
+                        </Text>
+                        {day.snippet ? (
+                          <Text style={{ fontSize: 11, color: theme.textMuted, marginTop: 6, lineHeight: 15 }} numberOfLines={2}>
+                            &ldquo;{day.snippet}&rdquo;
+                          </Text>
+                        ) : null}
+                      </View>
+                    )
+                  })}
+                </ScrollView>
+              )}
+
+              {/* === 4. Time of Day === */}
+              {sectionHeader('When You Feel Most', 'Your emotional rhythm through the day.')}
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 28 }}>
+                {timeBuckets.map((bucket, i) => {
+                  const isPeak = i === peakBucketIndex && bucket.moments.length > 0
+                  const topMoods = Object.entries(bucket.moodCounts)
+                    .sort((a, b) => b[1] - a[1])
+                    .slice(0, 3)
+                  const TimeIcon = i <= 1 ? Sun : Moon
+                  return (
+                    <View key={i} style={{
+                      width: (SCREEN_WIDTH - 40 - 10) / 2,
+                      paddingVertical: 14, paddingHorizontal: 14, borderRadius: 16,
+                      backgroundColor: isPeak
+                        ? (isDark ? 'rgba(245,158,11,0.12)' : 'rgba(245,158,11,0.08)')
+                        : theme.toggleBg,
+                      borderWidth: isPeak ? 1 : 0,
+                      borderColor: isPeak ? 'rgba(245,158,11,0.3)' : 'transparent',
+                    }}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 6 }}>
+                        <TimeIcon size={14} color={theme.textMuted} />
+                        <Text style={{ fontSize: 13, fontWeight: '600', color: isDark ? '#ffffff' : '#111827' }}>
+                          {bucket.label}
+                        </Text>
+                      </View>
+                      <Text style={{ fontSize: 11, color: theme.textFaint, marginBottom: 8 }}>
+                        {bucket.moments.length} moment{bucket.moments.length !== 1 ? 's' : ''}
+                      </Text>
+                      <View style={{ flexDirection: 'row', gap: 4 }}>
+                        {topMoods.map(([mood]) => (
+                          <View key={mood} style={{
+                            width: 10, height: 10, borderRadius: 5,
+                            backgroundColor: MOOD_COLORS[mood] || '#6b7280',
+                          }} />
+                        ))}
+                      </View>
+                      {isPeak && (
+                        <Text style={{ fontSize: 10, color: '#f59e0b', fontWeight: '600', marginTop: 8 }}>
+                          Your most expressive time
+                        </Text>
+                      )}
+                    </View>
+                  )
+                })}
+              </View>
+
+              {/* === 5. Mood & Moments — Expression by Type === */}
+              {sectionHeader('Mood & Moments', 'How you choose to express each feeling.')}
+              <View style={{ gap: 12, marginBottom: 28 }}>
+                {typeData.map(({ type, count, moodCounts: mc, total, topMood }) => {
+                  const sorted = Object.entries(mc).sort((a, b) => b[1] - a[1])
+                  return (
+                    <View key={type} style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+                      <LinearGradient
+                        colors={typeGradient(type)}
+                        style={{
+                          width: 36, height: 36, borderRadius: 12,
+                          alignItems: 'center', justifyContent: 'center',
+                        }}
+                      >
+                        <TypeIcon type={type} size={16} />
+                      </LinearGradient>
+                      <View style={{ flex: 1 }}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+                          <Text style={{ fontSize: 13, fontWeight: '600', color: isDark ? '#ffffff' : '#111827', textTransform: 'capitalize' }}>
+                            {type}
+                          </Text>
+                          <Text style={{ fontSize: 11, color: theme.textFaint }}>{count}</Text>
+                        </View>
+                        {total > 0 && (
+                          <View style={{ flexDirection: 'row', height: 6, borderRadius: 3, overflow: 'hidden' }}>
+                            {sorted.map(([mood, c]) => (
+                              <View key={mood} style={{
+                                flex: c / total, minWidth: 3,
+                                backgroundColor: MOOD_COLORS[mood] || '#6b7280',
+                              }} />
+                            ))}
+                          </View>
+                        )}
+                        {topMood && (
+                          <Text style={{ fontSize: 10, color: theme.textFaint, marginTop: 4, fontStyle: 'italic' }}>
+                            You tend to {typeVerbs[type] || type} when you feel {topMood}.
+                          </Text>
+                        )}
+                      </View>
+                    </View>
+                  )
+                })}
+              </View>
+
+              {/* === 6. A Gentle Summary === */}
+              {sectionHeader('A Gentle Summary', 'Your story, in a few words.')}
+              <LinearGradient
+                colors={[`${summaryGradient[0]}20`, `${summaryGradient[1]}20`]}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={{
+                  borderRadius: 20, padding: 20,
+                  borderWidth: 1,
+                  borderColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)',
+                }}
+              >
+                <Sparkles size={22} color={summaryGradient[0]} style={{ marginBottom: 12 }} />
+                <Text style={{
+                  fontSize: 15, lineHeight: 22, fontWeight: '500',
+                  color: isDark ? 'rgba(255,255,255,0.85)' : '#1f2937',
+                }}>
+                  {summary}
+                </Text>
+              </LinearGradient>
+            </ScrollView>
+          )}
+        </Pressable>
+      </Pressable>
+    </Modal>
+  )
+}
+
+// ============================================
 // Mood Landscape Hero
 // ============================================
 
 function MoodLandscapeHero({
   moments,
   theme,
+  onOpenAnalytics,
 }: {
   moments: Moment[]
   theme: Record<string, string>
+  onOpenAnalytics?: () => void
 }) {
   const now = new Date()
   const weekAgo = new Date(now)
@@ -714,6 +1256,22 @@ function MoodLandscapeHero({
           </View>
         )}
       </View>
+
+      {/* See your story */}
+      {onOpenAnalytics && (
+        <TouchableOpacity
+          onPress={onOpenAnalytics}
+          activeOpacity={0.7}
+          style={{
+            flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
+            marginTop: 12, paddingVertical: 8, borderRadius: 999,
+            backgroundColor: theme.toggleBg,
+          }}
+        >
+          <Sparkles size={13} color={theme.textMuted} />
+          <Text style={{ fontSize: 13, color: theme.textMuted, fontWeight: '500' }}>See your story</Text>
+        </TouchableOpacity>
+      )}
     </View>
   )
 }
@@ -1414,6 +1972,7 @@ export default function MomentsScreen() {
   const [selectedMoment, setSelectedMoment] = useState<Moment | null>(null)
   const [, setDeleting] = useState(false)
   const [isBloomOpen, setIsBloomOpen] = useState(false)
+  const [isAnalyticsOpen, setIsAnalyticsOpen] = useState(false)
 
   const fetchMoments = useCallback(async () => {
     if (!user) return
@@ -1604,7 +2163,7 @@ export default function MomentsScreen() {
         ) : (
           <>
             {/* ===== Mood Landscape Hero ===== */}
-            <MoodLandscapeHero moments={moments} theme={theme} />
+            <MoodLandscapeHero moments={moments} theme={theme} onOpenAnalytics={() => setIsAnalyticsOpen(true)} />
 
             {/* ===== Revisit Card ===== */}
             <RevisitCard
@@ -1794,6 +2353,15 @@ export default function MomentsScreen() {
 
       {/* ===== Bloom Chat Modal ===== */}
       <BloomChatModal isOpen={isBloomOpen} onClose={() => setIsBloomOpen(false)} isDark={isDark} />
+
+      {/* ===== Emotion Analytics Modal ===== */}
+      <EmotionAnalyticsModal
+        isOpen={isAnalyticsOpen}
+        onClose={() => setIsAnalyticsOpen(false)}
+        isDark={isDark}
+        moments={moments}
+        theme={theme}
+      />
     </SafeAreaView>
   )
 }
