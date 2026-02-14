@@ -1505,7 +1505,18 @@ export default function MomentsScreen() {
         {/* ===== Header ===== */}
         <View style={{ paddingHorizontal: 20, paddingTop: 24, paddingBottom: 8 }}>
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-            <View>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+              <TouchableOpacity
+                onPress={() => router.back()}
+                style={{
+                  width: 34, height: 34, borderRadius: 11,
+                  alignItems: 'center', justifyContent: 'center',
+                  backgroundColor: theme.toggleBg,
+                }}
+              >
+                <ChevronLeftIcon size={20} color={theme.textMuted} />
+              </TouchableOpacity>
+              <View>
               <Text style={{ fontSize: 26, fontWeight: '700', color: theme.text, letterSpacing: -0.5 }}>
                 Moments
               </Text>
@@ -1514,6 +1525,7 @@ export default function MomentsScreen() {
                   {moments.length} captured
                 </Text>
               )}
+              </View>
             </View>
 
             {/* Theme toggle + Add button */}
