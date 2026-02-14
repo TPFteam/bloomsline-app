@@ -1002,11 +1002,12 @@ export default function BalanceScreen() {
     if (!member?.id) return
     const existing = ritualCompletions.find(c => c.ritual_id === ritualId)
     const newCompleted = !existing?.completed
+    const now = new Date().toISOString()
     // Optimistic update
     if (existing) {
-      setRitualCompletions(prev => prev.map(c => c.ritual_id === ritualId ? { ...c, completed: newCompleted } : c))
+      setRitualCompletions(prev => prev.map(c => c.ritual_id === ritualId ? { ...c, completed: newCompleted, completed_at: newCompleted ? now : null } : c))
     } else {
-      setRitualCompletions(prev => [...prev, { ritual_id: ritualId, completed: true } as RitualCompletion])
+      setRitualCompletions(prev => [...prev, { ritual_id: ritualId, completed: true, completed_at: now } as RitualCompletion])
     }
     await toggleCompletion(member.id, ritualId, existing)
   }

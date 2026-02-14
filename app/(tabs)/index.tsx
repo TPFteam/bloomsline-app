@@ -137,7 +137,7 @@ export default function HomeScreen() {
   const [viewingMoment, setViewingMoment] = useState<MomentItem | null>(null)
   const [memberRituals, setMemberRituals] = useState<MemberRitual[]>([])
   const [ritualCompletions, setRitualCompletions] = useState<RitualCompletion[]>([])
-
+  const [previewRitual, setPreviewRitual] = useState<{ ritual: MemberRitual; completion: RitualCompletion | null } | null>(null)
 
   const firstName = member?.first_name || user?.user_metadata?.full_name?.split(' ')[0] || 'Friend'
   const totalSeedLogs = Object.values(anchorLogs).reduce((sum, c) => sum + c, 0)
@@ -427,11 +427,22 @@ export default function HomeScreen() {
 
                 {/* Ritual markers on timeline */}
                 {memberRituals.map((mr) => {
-                  const isCompleted = ritualCompletions.some(c => c.ritual_id === mr.ritual_id && c.completed)
+                  const completion = ritualCompletions.find(c => c.ritual_id === mr.ritual_id && c.completed)
+                  const isCompleted = !!completion
                   const timeStr = mr.planned_time
                   if (!timeStr) return null
-                  const [hours, minutes] = timeStr.split(':').map(Number)
-                  const hour = hours + minutes / 60
+
+                  // Use actual completion time if completed, otherwise use planned time
+                  let displayTime = timeStr.slice(0, 5)
+                  let hour: number
+                  if (isCompleted && completion.created_at) {
+                    const ct = new Date(completion.created_at)
+                    hour = ct.getHours() + ct.getMinutes() / 60
+                    displayTime = `${String(ct.getHours()).padStart(2, '0')}:${String(ct.getMinutes()).padStart(2, '0')}`
+                  } else {
+                    const [hours, minutes] = timeStr.split(':').map(Number)
+                    hour = hours + minutes / 60
+                  }
                   const x = hourToPosition(hour)
                   if (x < -5 || x > 105) return null
 
@@ -440,15 +451,17 @@ export default function HomeScreen() {
                   const IconComp = RITUAL_ICONS[mr.ritual.icon || ''] || Circle
 
                   return (
-                    <View
+                    <TouchableOpacity
                       key={`r-${mr.id}`}
-                      pointerEvents="none"
+                      activeOpacity={0.7}
+                      onPress={() => setPreviewRitual({ ritual: mr, completion: isCompleted ? completion : null })}
                       style={{
                         position: 'absolute',
                         left: `${x}%`,
                         top: 6,
                         marginLeft: -11,
                         alignItems: 'center',
+                        zIndex: 10,
                       }}
                     >
                       <View style={{
@@ -471,9 +484,9 @@ export default function HomeScreen() {
                         fontSize: 8, color: isCompleted ? '#059669' : isPast ? '#f87171' : '#9ca3af',
                         fontWeight: '600', marginTop: 1,
                       }}>
-                        {timeStr.slice(0, 5)}
+                        {displayTime}
                       </Text>
-                    </View>
+                    </TouchableOpacity>
                   )
                 })}
 
@@ -1001,6 +1014,135 @@ export default function HomeScreen() {
                 >
                   <Text style={{ fontSize: 15, fontWeight: '600', color: '#374151' }}>Close</Text>
                 </TouchableOpacity>
+              </Pressable>
+            </Pressable>
+          )
+        })()}
+      </Modal>
+
+      {/* Ritual Preview Modal */}
+      <Modal visible={!!previewRitual} transparent animationType="fade" onRequestClose={() => setPreviewRitual(null)}>
+        {previewRitual && (() => {
+          const { ritual: mr, completion } = previewRitual
+          const isCompleted = !!completion
+          const cat = RITUAL_CATEGORY_COLORS[mr.ritual.category] || RITUAL_CATEGORY_COLORS.morning
+          const IconComp = RITUAL_ICONS[mr.ritual.icon || ''] || Circle
+
+          return (
+            <Pressable
+              style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'center', alignItems: 'center' }}
+              onPress={() => setPreviewRitual(null)}
+            >
+              <Pressable onPress={() => {}} style={{
+                width: '85%', maxWidth: 340, backgroundColor: '#fff',
+                borderRadius: 24, overflow: 'hidden',
+                shadowColor: '#000', shadowOffset: { width: 0, height: 8 },
+                shadowOpacity: 0.15, shadowRadius: 24, elevation: 10,
+              }}>
+                {/* Header */}
+                <View style={{
+                  backgroundColor: `${cat.bg}`,
+                  paddingVertical: 24, alignItems: 'center',
+                }}>
+                  <View style={{
+                    width: 56, height: 56, borderRadius: 16,
+                    backgroundColor: cat.accent, alignItems: 'center', justifyContent: 'center',
+                    marginBottom: 10,
+                  }}>
+                    <IconComp size={28} color="#ffffff" />
+                  </View>
+                  <Text style={{ fontSize: 18, fontWeight: '700', color: '#111827', textAlign: 'center' }}>
+                    {mr.ritual.name}
+                  </Text>
+                  <View style={{
+                    marginTop: 8, backgroundColor: cat.accent, borderRadius: 12,
+                    paddingHorizontal: 10, paddingVertical: 3,
+                  }}>
+                    <Text style={{ fontSize: 11, fontWeight: '600', color: '#fff' }}>
+                      {mr.ritual.category.charAt(0).toUpperCase() + mr.ritual.category.slice(1)}
+                    </Text>
+                  </View>
+                </View>
+
+                {/* Content */}
+                <View style={{ padding: 16 }}>
+                  {/* Description */}
+                  {mr.ritual.description ? (
+                    <Text style={{ fontSize: 14, color: '#6b7280', lineHeight: 20, marginBottom: 12 }}>
+                      {mr.ritual.description}
+                    </Text>
+                  ) : null}
+
+                  {/* Planned time + duration */}
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 12 }}>
+                    {mr.planned_time ? (
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                        <Clock size={14} color="#9ca3af" />
+                        <Text style={{ fontSize: 13, color: '#6b7280' }}>Planned: {mr.planned_time.slice(0, 5)}</Text>
+                      </View>
+                    ) : null}
+                    {mr.ritual.duration_suggestion ? (
+                      <Text style={{ fontSize: 13, color: '#6b7280' }}>{mr.ritual.duration_suggestion} min</Text>
+                    ) : null}
+                  </View>
+
+                  {/* Completion info */}
+                  {isCompleted && completion.created_at ? (
+                    <View style={{
+                      flexDirection: 'row', alignItems: 'center', gap: 10,
+                      backgroundColor: '#ecfdf5', borderRadius: 14, padding: 12, marginBottom: 12,
+                    }}>
+                      <View style={{
+                        width: 32, height: 32, borderRadius: 16,
+                        backgroundColor: '#059669', alignItems: 'center', justifyContent: 'center',
+                      }}>
+                        <Check size={16} color="#ffffff" />
+                      </View>
+                      <View>
+                        <Text style={{ fontSize: 14, fontWeight: '600', color: '#059669' }}>Completed</Text>
+                        <Text style={{ fontSize: 12, color: '#10b981' }}>
+                          {new Date(completion.created_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
+                          {completion.duration_minutes ? ` \u2022 ${completion.duration_minutes} min` : ''}
+                        </Text>
+                      </View>
+                    </View>
+                  ) : null}
+
+                  {/* Notes */}
+                  {completion?.notes ? (
+                    <View style={{ backgroundColor: '#f9fafb', borderRadius: 14, padding: 12, marginBottom: 12 }}>
+                      <Text style={{ fontSize: 11, fontWeight: '600', color: '#9ca3af', marginBottom: 4 }}>Notes</Text>
+                      <Text style={{ fontSize: 13, color: '#374151', lineHeight: 18 }}>{completion.notes}</Text>
+                    </View>
+                  ) : null}
+
+                  {/* Buttons */}
+                  <View style={{ flexDirection: 'row', gap: 8 }}>
+                    <TouchableOpacity
+                      onPress={() => setPreviewRitual(null)}
+                      style={{
+                        flex: 1, backgroundColor: '#f3f4f6', borderRadius: 14,
+                        paddingVertical: 12, alignItems: 'center',
+                      }}
+                    >
+                      <Text style={{ fontSize: 14, fontWeight: '600', color: '#374151' }}>Close</Text>
+                    </TouchableOpacity>
+                    {!isCompleted && (
+                      <TouchableOpacity
+                        onPress={() => {
+                          setPreviewRitual(null)
+                          router.push('/(tabs)/rituals')
+                        }}
+                        style={{
+                          flex: 1, backgroundColor: cat.accent, borderRadius: 14,
+                          paddingVertical: 12, alignItems: 'center',
+                        }}
+                      >
+                        <Text style={{ fontSize: 14, fontWeight: '600', color: '#ffffff' }}>Start</Text>
+                      </TouchableOpacity>
+                    )}
+                  </View>
+                </View>
               </Pressable>
             </Pressable>
           )

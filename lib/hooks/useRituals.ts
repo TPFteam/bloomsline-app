@@ -62,9 +62,11 @@ export function useRituals() {
     const existing = todayCompletions.find(c => c.ritual_id === ritualId)
 
     // Optimistic update
+    const now = new Date().toISOString()
     if (existing) {
+      const newCompleted = !existing.completed
       setTodayCompletions(prev =>
-        prev.map(c => c.id === existing.id ? { ...c, completed: !c.completed } : c)
+        prev.map(c => c.id === existing.id ? { ...c, completed: newCompleted, completed_at: newCompleted ? now : null } : c)
       )
     } else {
       const tempCompletion: RitualCompletion = {
@@ -73,6 +75,8 @@ export function useRituals() {
         member_id: memberId,
         completion_date: new Date().toISOString().split('T')[0],
         completed: true,
+        completed_at: now,
+        created_at: now,
         duration_minutes: null,
         notes: null,
         mood: null,
