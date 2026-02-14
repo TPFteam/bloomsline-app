@@ -199,7 +199,7 @@ function BloomPill({ isDark, onPress }: { isDark: boolean; onPress?: () => void 
 
   return (
     <View style={{
-      position: 'absolute', bottom: 24, left: 0, right: 0,
+      position: 'absolute', bottom: 40, left: 0, right: 0,
       alignItems: 'center', zIndex: 50,
     }}>
       <TouchableOpacity
