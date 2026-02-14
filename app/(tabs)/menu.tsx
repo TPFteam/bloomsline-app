@@ -26,10 +26,10 @@ export default function MenuScreen() {
   const menuItems: { icon: any; label: string; color: string; route: string | null }[] = [
     { icon: Heart, label: 'Progress', color: '#059669', route: '/progress' },
     { icon: User, label: 'My Practitioner', color: '#ec4899', route: '/practitioner' },
-    { icon: PieChart, label: 'Balance', color: '#6366f1', route: null },
-    { icon: Heart, label: 'Reflect', color: '#f43f5e', route: null },
+    { icon: PieChart, label: 'Balance', color: '#6366f1', route: '/balance' },
+    { icon: Heart, label: 'Reflect', color: '#f43f5e', route: '/reflect' },
     { icon: BookOpen, label: 'Resources', color: '#f59e0b', route: null },
-    { icon: Settings, label: 'Settings', color: '#737373', route: null },
+    { icon: Settings, label: 'Settings', color: '#737373', route: '/settings' },
   ]
 
   function handleItemPress(item: typeof menuItems[0]) {

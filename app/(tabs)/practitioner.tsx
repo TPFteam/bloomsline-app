@@ -11,6 +11,7 @@ import {
   TextInput,
   Alert,
   Platform,
+  Image,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { LinearGradient } from 'expo-linear-gradient'
@@ -34,6 +35,7 @@ import {
   ArrowLeft,
   Plus,
 } from 'lucide-react-native'
+import { useRouter } from 'expo-router'
 import { useAuth } from '@/lib/auth-context'
 import { supabase } from '@/lib/supabase'
 
@@ -757,6 +759,7 @@ function renderBlock(
 
 export default function PractitionerScreen() {
   const { member } = useAuth()
+  const router = useRouter()
 
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
@@ -1310,22 +1313,33 @@ export default function PractitionerScreen() {
         {/* ============================================ */}
         {/* PRACTITIONER CARD */}
         {/* ============================================ */}
-        <View style={{
-          backgroundColor: '#fff', borderRadius: 20, padding: 20, marginBottom: 24,
-          borderWidth: 1, borderColor: '#f3f4f6',
-          shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.04, shadowRadius: 6, elevation: 2,
-        }}>
+        <TouchableOpacity
+          activeOpacity={practitioner ? 0.7 : 1}
+          onPress={() => { if (practitioner) setQuickModal('practitioners') }}
+          style={{
+            backgroundColor: '#fff', borderRadius: 20, padding: 20, marginBottom: 24,
+            borderWidth: 1, borderColor: '#f3f4f6',
+            shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.04, shadowRadius: 6, elevation: 2,
+          }}
+        >
           {practitioner ? (
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}>
-              {/* Avatar */}
-              <LinearGradient
-                colors={['#2dd4bf', '#059669']}
-                style={{ width: 64, height: 64, borderRadius: 32, alignItems: 'center', justifyContent: 'center' }}
-              >
-                <Text style={{ color: '#fff', fontSize: 24, fontWeight: '700' }}>
-                  {(practitioner.full_name || '?')[0].toUpperCase()}
-                </Text>
-              </LinearGradient>
+              {/* Avatar — photo or fallback initial */}
+              {practitioner.avatar_url ? (
+                <Image
+                  source={{ uri: practitioner.avatar_url }}
+                  style={{ width: 64, height: 64, borderRadius: 32, backgroundColor: '#f3f4f6' }}
+                />
+              ) : (
+                <LinearGradient
+                  colors={['#2dd4bf', '#059669']}
+                  style={{ width: 64, height: 64, borderRadius: 32, alignItems: 'center', justifyContent: 'center' }}
+                >
+                  <Text style={{ color: '#fff', fontSize: 24, fontWeight: '700' }}>
+                    {(practitioner.full_name || '?')[0].toUpperCase()}
+                  </Text>
+                </LinearGradient>
+              )}
 
               <View style={{ flex: 1 }}>
                 <Text style={{ fontSize: 18, fontWeight: '700', color: '#171717' }}>
@@ -1348,6 +1362,7 @@ export default function PractitionerScreen() {
                   </View>
                 )}
               </View>
+              <ChevronRight size={20} color="#d1d5db" />
             </View>
           ) : (
             <View style={{ alignItems: 'center', paddingVertical: 24 }}>
@@ -1365,7 +1380,7 @@ export default function PractitionerScreen() {
               </Text>
             </View>
           )}
-        </View>
+        </TouchableOpacity>
 
         {/* ============================================ */}
         {/* RESOURCES SECTION */}
@@ -1765,7 +1780,7 @@ export default function PractitionerScreen() {
             {[
               { label: 'My Practitioners', desc: 'View your practitioners', colors: ['#8b5cf6', '#7c3aed'] as [string, string], Icon: Users, action: () => setQuickModal('practitioners') },
               { label: 'My Assessments', desc: 'Assessments and exercises', colors: ['#059669', '#0d9488'] as [string, string], Icon: FileText, action: () => { setAssessmentFilter('all'); setQuickModal('assessments') } },
-              { label: 'My Stories', desc: 'Therapeutic stories', colors: ['#f59e0b', '#ea580c'] as [string, string], Icon: BookOpen, action: () => { if (Platform.OS === 'web') alert('Stories are coming soon!'); else Alert.alert('Coming soon', 'Therapeutic stories will be available soon.') } },
+              { label: 'My Stories', desc: 'Therapeutic stories', colors: ['#f59e0b', '#ea580c'] as [string, string], Icon: BookOpen, action: () => router.push('/stories' as any) },
             ].map((item) => (
               <TouchableOpacity key={item.label} activeOpacity={0.7} onPress={item.action} style={{
                 flexDirection: 'row', alignItems: 'center', gap: 14,
@@ -2036,14 +2051,21 @@ export default function PractitionerScreen() {
               }}>
                 {/* Avatar + name */}
                 <View style={{ alignItems: 'center', marginBottom: 20 }}>
-                  <LinearGradient
-                    colors={['#8b5cf6', '#7c3aed']}
-                    style={{ width: 80, height: 80, borderRadius: 40, alignItems: 'center', justifyContent: 'center', marginBottom: 12 }}
-                  >
-                    <Text style={{ color: '#fff', fontSize: 32, fontWeight: '700' }}>
-                      {(practitioner.full_name || '?')[0].toUpperCase()}
-                    </Text>
-                  </LinearGradient>
+                  {practitioner.avatar_url ? (
+                    <Image
+                      source={{ uri: practitioner.avatar_url }}
+                      style={{ width: 80, height: 80, borderRadius: 40, backgroundColor: '#f3f4f6', marginBottom: 12 }}
+                    />
+                  ) : (
+                    <LinearGradient
+                      colors={['#8b5cf6', '#7c3aed']}
+                      style={{ width: 80, height: 80, borderRadius: 40, alignItems: 'center', justifyContent: 'center', marginBottom: 12 }}
+                    >
+                      <Text style={{ color: '#fff', fontSize: 32, fontWeight: '700' }}>
+                        {(practitioner.full_name || '?')[0].toUpperCase()}
+                      </Text>
+                    </LinearGradient>
+                  )}
                   <Text style={{ fontSize: 20, fontWeight: '700', color: '#171717' }}>
                     {practitioner.full_name || 'Your Practitioner'}
                   </Text>

@@ -75,9 +75,12 @@ export default function DailyStoryScreen() {
     if (!user?.id || !member?.id) return
 
     async function load() {
-      const dateStr = (params.date || new Date().toISOString()).split('T')[0]
-      const dayStart = new Date(dateStr + 'T00:00:00')
-      const dayEnd = new Date(dateStr + 'T23:59:59.999')
+      // Use the passed date or current date — always work in local time
+      const baseDate = params.date ? new Date(params.date) : new Date()
+      const dayStart = new Date(baseDate)
+      dayStart.setHours(0, 0, 0, 0)
+      const dayEnd = new Date(baseDate)
+      dayEnd.setHours(23, 59, 59, 999)
 
       const y = dayStart.getFullYear()
       const mo = String(dayStart.getMonth() + 1).padStart(2, '0')

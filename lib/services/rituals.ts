@@ -303,7 +303,9 @@ export async function createCustomRitual(
     .from('rituals')
     .insert({
       name: details.name,
+      name_fr: details.name,
       description: details.description || null,
+      description_fr: details.description || null,
       category: details.category,
       icon: details.icon || 'heart',
       duration_suggestion: details.durationSuggestion || null,

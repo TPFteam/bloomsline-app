@@ -12,9 +12,9 @@ import { useAuth } from '@/lib/auth-context'
 const menuItems = [
   { label: 'Progress', icon: Heart, gradient: ['#34d399', '#14b8a6'] as const, route: '/progress' },
   { label: 'My Practitioner', icon: User, gradient: ['#fb7185', '#ec4899'] as const, route: '/practitioner' },
-  { label: 'Balance', icon: PieChart, gradient: ['#8b5cf6', '#7c3aed'] as const, route: null },
-  { label: 'Reflect', icon: Heart, gradient: ['#2dd4bf', '#10b981'] as const, route: null },
-  { label: 'Settings', icon: Settings, gradient: ['#9ca3af', '#6b7280'] as const, route: null },
+  { label: 'Balance', icon: PieChart, gradient: ['#8b5cf6', '#7c3aed'] as const, route: '/balance' },
+  { label: 'Reflect', icon: Heart, gradient: ['#2dd4bf', '#10b981'] as const, route: '/reflect' },
+  { label: 'Settings', icon: Settings, gradient: ['#9ca3af', '#6b7280'] as const, route: '/settings' },
 ]
 
 function FloatingCameraButton() {
@@ -78,10 +78,14 @@ export default function TabLayout() {
 
   function handleSignOut() {
     setShowMenu(false)
-    Alert.alert('Sign out', 'Are you sure?', [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Sign out', style: 'destructive', onPress: signOut },
-    ])
+    if (Platform.OS === 'web') {
+      if (confirm('Are you sure you want to sign out?')) signOut()
+    } else {
+      Alert.alert('Sign out', 'Are you sure?', [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Sign out', style: 'destructive', onPress: signOut },
+      ])
+    }
   }
 
   return (
@@ -158,6 +162,10 @@ export default function TabLayout() {
         {/* Hide from tabs — accessed via Menu */}
         <Tabs.Screen name="progress" options={{ href: null }} />
         <Tabs.Screen name="practitioner" options={{ href: null }} />
+        <Tabs.Screen name="stories" options={{ href: null }} />
+        <Tabs.Screen name="reflect" options={{ href: null }} />
+        <Tabs.Screen name="balance" options={{ href: null }} />
+        <Tabs.Screen name="settings" options={{ href: null }} />
       </Tabs>
 
       <FloatingCameraButton />

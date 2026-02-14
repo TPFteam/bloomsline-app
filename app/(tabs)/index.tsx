@@ -51,11 +51,45 @@ import {
   Music,
   Play,
   X,
+  Moon,
+  Eye,
+  Sprout,
+  StretchHorizontal,
+  MapPin,
+  Cloud,
+  RefreshCw,
+  List,
+  Gift,
+  Hand,
+  Stars,
+  CalendarHeart,
+  Sofa,
+  Mail,
+  Smile,
+  Shield,
+  Check,
 } from 'lucide-react-native'
 import { useAuth } from '@/lib/auth-context'
 import { supabase } from '@/lib/supabase'
+import { fetchMemberRituals, fetchTodayCompletions, type MemberRitual, type RitualCompletion } from '@/lib/services/rituals'
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window')
+
+// Ritual icon mapping
+const RITUAL_ICONS: Record<string, any> = {
+  eye: Eye, coffee: Coffee, sprout: Sprout, 'stretch-horizontal': StretchHorizontal,
+  sun: Sun, 'map-pin': MapPin, music: Music, cloud: Cloud,
+  'refresh-cw': RefreshCw, heart: Heart, list: List, gift: Gift,
+  moon: Moon, hand: Hand, stars: Stars, 'calendar-heart': CalendarHeart,
+  sofa: Sofa, mail: Mail, smile: Smile, shield: Shield,
+}
+
+const RITUAL_CATEGORY_COLORS: Record<string, { accent: string; bg: string }> = {
+  morning: { accent: '#f59e0b', bg: '#fef3c7' },
+  midday: { accent: '#059669', bg: '#d1fae5' },
+  evening: { accent: '#6366f1', bg: '#e0e7ff' },
+  selfcare: { accent: '#ec4899', bg: '#fce7f3' },
+}
 
 // Anchor icon mapping (same as Next.js app)
 const ANCHOR_ICONS: Record<string, any> = {
@@ -93,6 +127,7 @@ export default function HomeScreen() {
   const [moments, setMoments] = useState<MomentItem[]>([])
   const [anchors, setAnchors] = useState<Anchor[]>([])
   const [anchorLogs, setAnchorLogs] = useState<Record<string, number>>({})
+  const [anchorLogEntries, setAnchorLogEntries] = useState<{ anchor_id: string; logged_at: string }[]>([])
   const [refreshing, setRefreshing] = useState(false)
   const [loading, setLoading] = useState(true)
   const [selectedDate, setSelectedDate] = useState(new Date())
@@ -100,6 +135,9 @@ export default function HomeScreen() {
   const [centerHour, setCenterHour] = useState(12)
   const [currentTime, setCurrentTime] = useState(new Date())
   const [viewingMoment, setViewingMoment] = useState<MomentItem | null>(null)
+  const [memberRituals, setMemberRituals] = useState<MemberRitual[]>([])
+  const [ritualCompletions, setRitualCompletions] = useState<RitualCompletion[]>([])
+
 
   const firstName = member?.first_name || user?.user_metadata?.full_name?.split(' ')[0] || 'Friend'
   const totalSeedLogs = Object.values(anchorLogs).reduce((sum, c) => sum + c, 0)
@@ -123,7 +161,7 @@ export default function HomeScreen() {
     const d = String(dayStart.getDate()).padStart(2, '0')
     const dateStr = `${y}-${mo}-${d}`
 
-    const [momentsRes, anchorsRes, logsRes] = await Promise.all([
+    const [momentsRes, anchorsRes, logsRes, ritualsData, completionsData] = await Promise.all([
       supabase
         .from('moments')
         .select('id, created_at, moods, type, caption, media_url, text_content')
@@ -139,16 +177,22 @@ export default function HomeScreen() {
         .order('sort_order', { ascending: true }),
       supabase
         .from('anchor_logs')
-        .select('anchor_id')
+        .select('anchor_id, logged_at')
         .eq('member_id', member.id)
         .eq('log_date', dateStr),
+      fetchMemberRituals(member.id),
+      fetchTodayCompletions(member.id),
     ])
 
     setMoments((momentsRes.data ?? []) as MomentItem[])
     setAnchors((anchorsRes.data ?? []) as Anchor[])
+    setMemberRituals(ritualsData)
+    setRitualCompletions(completionsData)
 
+    const logEntries = (logsRes.data ?? []) as { anchor_id: string; logged_at: string }[]
+    setAnchorLogEntries(logEntries)
     const counts: Record<string, number> = {}
-    ;(logsRes.data ?? []).forEach((l: any) => {
+    logEntries.forEach((l) => {
       counts[l.anchor_id] = (counts[l.anchor_id] || 0) + 1
     })
     setAnchorLogs(counts)
@@ -168,6 +212,7 @@ export default function HomeScreen() {
     const now = new Date()
     const localDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
     setAnchorLogs(prev => ({ ...prev, [anchorId]: (prev[anchorId] || 0) + 1 }))
+    setAnchorLogEntries(prev => [...prev, { anchor_id: anchorId, logged_at: now.toISOString() }])
     await supabase.from('anchor_logs').insert({
       member_id: member.id,
       anchor_id: anchorId,
@@ -379,6 +424,94 @@ export default function HomeScreen() {
                 <View style={{ position: 'absolute', left: 0, right: 0, top: '25%', height: 1, backgroundColor: 'rgba(167, 243, 208, 0.3)' }} />
                 <View style={{ position: 'absolute', left: 0, right: 0, top: '50%', height: 1, backgroundColor: 'rgba(167, 243, 208, 0.5)' }} />
                 <View style={{ position: 'absolute', left: 0, right: 0, top: '75%', height: 1, backgroundColor: 'rgba(167, 243, 208, 0.3)' }} />
+
+                {/* Ritual markers on timeline */}
+                {memberRituals.map((mr) => {
+                  const isCompleted = ritualCompletions.some(c => c.ritual_id === mr.ritual_id && c.completed)
+                  const timeStr = mr.planned_time
+                  if (!timeStr) return null
+                  const [hours, minutes] = timeStr.split(':').map(Number)
+                  const hour = hours + minutes / 60
+                  const x = hourToPosition(hour)
+                  if (x < -5 || x > 105) return null
+
+                  const isPast = isToday() && hour < currentHour
+                  const cat = RITUAL_CATEGORY_COLORS[mr.ritual.category] || RITUAL_CATEGORY_COLORS.morning
+                  const IconComp = RITUAL_ICONS[mr.ritual.icon || ''] || Circle
+
+                  return (
+                    <View
+                      key={`r-${mr.id}`}
+                      pointerEvents="none"
+                      style={{
+                        position: 'absolute',
+                        left: `${x}%`,
+                        top: 6,
+                        marginLeft: -11,
+                        alignItems: 'center',
+                      }}
+                    >
+                      <View style={{
+                        width: 22, height: 22, borderRadius: 11,
+                        backgroundColor: isCompleted ? '#d1fae5' : 'rgba(255,255,255,0.9)',
+                        borderWidth: isCompleted ? 0 : 1.5,
+                        borderColor: isCompleted ? 'transparent' : isPast ? '#fca5a5' : '#d1d5db',
+                        borderStyle: isCompleted ? 'solid' : 'dashed',
+                        alignItems: 'center', justifyContent: 'center',
+                        shadowColor: '#000', shadowOffset: { width: 0, height: 1 },
+                        shadowOpacity: 0.08, shadowRadius: 2, elevation: 1,
+                      }}>
+                        {isCompleted ? (
+                          <Check size={11} color="#059669" strokeWidth={3} />
+                        ) : (
+                          <IconComp size={11} color={isPast ? '#f87171' : cat.accent} />
+                        )}
+                      </View>
+                      <Text style={{
+                        fontSize: 8, color: isCompleted ? '#059669' : isPast ? '#f87171' : '#9ca3af',
+                        fontWeight: '600', marginTop: 1,
+                      }}>
+                        {timeStr.slice(0, 5)}
+                      </Text>
+                    </View>
+                  )
+                })}
+
+                {/* Seed log markers on timeline */}
+                {anchorLogEntries.map((log, idx) => {
+                  const t = new Date(log.logged_at)
+                  const hour = t.getHours() + t.getMinutes() / 60
+                  const x = hourToPosition(hour)
+                  if (x < -5 || x > 105) return null
+
+                  const anchor = anchors.find(a => a.id === log.anchor_id)
+                  const isGrow = anchor?.type === 'grow'
+                  const IconComp = anchor ? (ANCHOR_ICONS[anchor.icon] || Circle) : Circle
+
+                  return (
+                    <View
+                      key={`s-${idx}`}
+                      pointerEvents="none"
+                      style={{
+                        position: 'absolute',
+                        left: `${x}%`,
+                        bottom: 6,
+                        marginLeft: -9,
+                        alignItems: 'center',
+                      }}
+                    >
+                      <View style={{
+                        width: 18, height: 18, borderRadius: 9,
+                        backgroundColor: isGrow ? '#ecfdf5' : '#fef3c7',
+                        borderWidth: 1.5,
+                        borderColor: isGrow ? '#a7f3d0' : '#fde68a',
+                        alignItems: 'center', justifyContent: 'center',
+                      }}>
+                        <IconComp size={9} color={isGrow ? '#059669' : '#d97706'} />
+                      </View>
+                    </View>
+                  )
+                })}
 
                 {/* Current time indicator */}
                 {isToday() && timePosition >= 0 && timePosition <= 100 && (
@@ -673,6 +806,96 @@ export default function HomeScreen() {
                 {anchors.length > 0 ? 'Tap to log' : 'Add anchors to track'}
               </Text>
             </View>
+
+            {/* ===== UPCOMING RITUALS ===== */}
+            {memberRituals.length > 0 && (() => {
+              const completedIds = new Set(ritualCompletions.filter(c => c.completed).map(c => c.ritual_id))
+              const upcoming = memberRituals.filter(mr => !completedIds.has(mr.ritual_id))
+              const completedCount = memberRituals.length - upcoming.length
+
+              return (
+                <View style={{
+                  backgroundColor: 'rgba(255,255,255,0.8)',
+                  borderRadius: 24, padding: 20,
+                  borderWidth: 1, borderColor: 'rgba(255,255,255,0.6)',
+                  shadowColor: '#059669', shadowOffset: { width: 0, height: 4 },
+                  shadowOpacity: 0.08, shadowRadius: 16, elevation: 4,
+                }}>
+                  {/* Header */}
+                  <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                      <LinearGradient
+                        colors={['#34d399', '#059669']}
+                        style={{ width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center' }}
+                      >
+                        <Circle size={16} color="#ffffff" />
+                      </LinearGradient>
+                      <Text style={{ fontSize: 16, fontWeight: '700', color: '#111827' }}>Upcoming Rituals</Text>
+                    </View>
+                    <Text style={{ fontSize: 12, color: '#9ca3af', fontWeight: '500' }}>
+                      {completedCount}/{memberRituals.length} done
+                    </Text>
+                  </View>
+
+                  {upcoming.length === 0 ? (
+                    <View style={{ alignItems: 'center', paddingVertical: 16 }}>
+                      <Text style={{ fontSize: 24, marginBottom: 4 }}>🎉</Text>
+                      <Text style={{ fontSize: 14, fontWeight: '600', color: '#059669' }}>All done for today!</Text>
+                    </View>
+                  ) : (
+                    <View style={{ gap: 8 }}>
+                      {upcoming.slice(0, 4).map((mr) => {
+                        const cat = RITUAL_CATEGORY_COLORS[mr.ritual.category] || RITUAL_CATEGORY_COLORS.morning
+                        const IconComp = RITUAL_ICONS[mr.ritual.icon || ''] || Heart
+                        const timeStr = mr.planned_time ? mr.planned_time.slice(0, 5) : ''
+
+                        return (
+                          <TouchableOpacity
+                            key={mr.id}
+                            activeOpacity={0.7}
+                            onPress={() => router.push('/(tabs)/rituals')}
+                            style={{
+                              flexDirection: 'row', alignItems: 'center', gap: 10,
+                              backgroundColor: '#f9fafb', borderRadius: 14, padding: 12,
+                            }}
+                          >
+                            <View style={{
+                              width: 36, height: 36, borderRadius: 10,
+                              backgroundColor: cat.bg, alignItems: 'center', justifyContent: 'center',
+                            }}>
+                              <IconComp size={17} color={cat.accent} />
+                            </View>
+                            <View style={{ flex: 1 }}>
+                              <Text style={{ fontSize: 14, fontWeight: '600', color: '#171717' }} numberOfLines={1}>
+                                {mr.ritual.name}
+                              </Text>
+                              {timeStr ? (
+                                <Text style={{ fontSize: 12, color: '#9ca3af', marginTop: 1 }}>{timeStr}</Text>
+                              ) : null}
+                            </View>
+                            {mr.ritual.duration_suggestion ? (
+                              <View style={{ backgroundColor: '#ecfdf5', borderRadius: 8, paddingHorizontal: 8, paddingVertical: 3 }}>
+                                <Text style={{ fontSize: 11, color: '#059669', fontWeight: '600' }}>{mr.ritual.duration_suggestion}m</Text>
+                              </View>
+                            ) : null}
+                          </TouchableOpacity>
+                        )
+                      })}
+                      {upcoming.length > 4 && (
+                        <TouchableOpacity
+                          onPress={() => router.push('/(tabs)/rituals')}
+                          style={{ alignItems: 'center', paddingVertical: 8 }}
+                        >
+                          <Text style={{ fontSize: 13, fontWeight: '600', color: '#059669' }}>
+                            +{upcoming.length - 4} more · View all
+                          </Text>
+                        </TouchableOpacity>
+                      )}
+                    </View>
+                  )}
+                </View>
+              )
+            })()}
 
           </View>
         </ScrollView>

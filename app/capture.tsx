@@ -317,7 +317,11 @@ export default function CaptureScreen() {
       })
 
       if (result) {
-        router.back()
+        if (router.canDismiss()) {
+          router.dismiss()
+        } else {
+          router.replace('/(tabs)')
+        }
       } else {
         Alert.alert('Error', 'Could not save moment. Please try again.')
       }
@@ -359,7 +363,7 @@ export default function CaptureScreen() {
         {/* Header */}
         <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 12 }}>
           <TouchableOpacity
-            onPress={() => step === 'select' ? router.back() : resetCapture()}
+            onPress={() => step === 'select' ? (router.canDismiss() ? router.dismiss() : router.replace('/(tabs)')) : resetCapture()}
             style={{
               width: 40, height: 40, borderRadius: 20,
               backgroundColor: 'rgba(255,255,255,0.1)',
@@ -385,48 +389,67 @@ export default function CaptureScreen() {
               How would you like to capture this moment?
             </Text>
 
-            <View style={{
-              flexDirection: 'row', flexWrap: 'wrap',
-              gap: 16, justifyContent: 'center',
-              maxWidth: 320, alignSelf: 'center',
-            }}>
-              {captureTypes.map((type) => (
-                <TouchableOpacity
-                  key={type.id}
-                  onPress={() => handleTypeSelect(type.id)}
-                  activeOpacity={0.8}
-                  style={{
-                    width: (320 - 16) / 2,
-                    backgroundColor: 'rgba(255,255,255,0.08)',
-                    borderRadius: 24,
-                    padding: 24,
-                    alignItems: 'center',
-                    gap: 12,
-                    borderWidth: 1,
-                    borderColor: 'rgba(255,255,255,0.08)',
-                  }}
-                >
-                  <LinearGradient
-                    colors={type.colors}
+            <View style={{ gap: 14, width: '100%', maxWidth: 340, alignSelf: 'center' }}>
+              {/* Row 1 */}
+              <View style={{ flexDirection: 'row', gap: 14 }}>
+                {captureTypes.slice(0, 2).map((type) => (
+                  <TouchableOpacity
+                    key={type.id}
+                    onPress={() => handleTypeSelect(type.id)}
+                    activeOpacity={0.8}
                     style={{
-                      width: 64, height: 64, borderRadius: 16,
-                      alignItems: 'center', justifyContent: 'center',
+                      flex: 1,
+                      backgroundColor: 'rgba(255,255,255,0.08)',
+                      borderRadius: 24,
+                      padding: 20,
+                      alignItems: 'center',
+                      gap: 10,
+                      borderWidth: 1,
+                      borderColor: 'rgba(255,255,255,0.08)',
                     }}
                   >
-                    {type.id === 'photo' && <Camera size={32} color="#fff" />}
-                    {type.id === 'video' && <Video size={32} color="#fff" />}
-                    {type.id === 'voice' && <Mic size={32} color="#fff" />}
-                    {type.id === 'write' && <FileText size={32} color="#fff" />}
-                  </LinearGradient>
-
-                  <Text style={{ color: '#ffffff', fontWeight: '600', fontSize: 15 }}>
-                    {type.label}
-                  </Text>
-                  <Text style={{ color: 'rgba(255,255,255,0.4)', fontSize: 12, textAlign: 'center' }}>
-                    {type.desc}
-                  </Text>
-                </TouchableOpacity>
-              ))}
+                    <LinearGradient
+                      colors={type.colors}
+                      style={{ width: 56, height: 56, borderRadius: 16, alignItems: 'center', justifyContent: 'center' }}
+                    >
+                      {type.id === 'photo' && <Camera size={28} color="#fff" />}
+                      {type.id === 'video' && <Video size={28} color="#fff" />}
+                    </LinearGradient>
+                    <Text style={{ color: '#ffffff', fontWeight: '600', fontSize: 15 }}>{type.label}</Text>
+                    <Text style={{ color: 'rgba(255,255,255,0.4)', fontSize: 11, textAlign: 'center' }}>{type.desc}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+              {/* Row 2 */}
+              <View style={{ flexDirection: 'row', gap: 14 }}>
+                {captureTypes.slice(2, 4).map((type) => (
+                  <TouchableOpacity
+                    key={type.id}
+                    onPress={() => handleTypeSelect(type.id)}
+                    activeOpacity={0.8}
+                    style={{
+                      flex: 1,
+                      backgroundColor: 'rgba(255,255,255,0.08)',
+                      borderRadius: 24,
+                      padding: 20,
+                      alignItems: 'center',
+                      gap: 10,
+                      borderWidth: 1,
+                      borderColor: 'rgba(255,255,255,0.08)',
+                    }}
+                  >
+                    <LinearGradient
+                      colors={type.colors}
+                      style={{ width: 56, height: 56, borderRadius: 16, alignItems: 'center', justifyContent: 'center' }}
+                    >
+                      {type.id === 'voice' && <Mic size={28} color="#fff" />}
+                      {type.id === 'write' && <FileText size={28} color="#fff" />}
+                    </LinearGradient>
+                    <Text style={{ color: '#ffffff', fontWeight: '600', fontSize: 15 }}>{type.label}</Text>
+                    <Text style={{ color: 'rgba(255,255,255,0.4)', fontSize: 11, textAlign: 'center' }}>{type.desc}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
             </View>
           </View>
         )}
