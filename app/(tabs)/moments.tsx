@@ -15,9 +15,12 @@ import {
   TextInput,
   KeyboardAvoidingView,
   Platform,
+  Share,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { LinearGradient } from 'expo-linear-gradient'
+import ViewShot, { captureRef } from 'react-native-view-shot'
+import * as Sharing from 'expo-sharing'
 import { useRouter, useFocusEffect } from 'expo-router'
 import {
   Plus,
@@ -37,6 +40,8 @@ import {
   ChevronLeft as ChevronLeftIcon,
   ChevronRight as ChevronRightIcon,
   Shuffle,
+  Share2,
+  MessageCircle,
 } from 'lucide-react-native'
 import { useAuth } from '@/lib/auth-context'
 import { getMemberMoments, deleteMoment, type Moment } from '@/lib/services/moments'
@@ -589,14 +594,18 @@ function EmotionAnalyticsModal({
   isDark,
   moments,
   theme,
+  onTalkToBloom,
 }: {
   isOpen: boolean
   onClose: () => void
   isDark: boolean
   moments: Moment[]
   theme: Record<string, string>
+  onTalkToBloom?: (message: string) => void
 }) {
   const { height: screenHeight } = Dimensions.get('window')
+  const [selectedMoodRing, setSelectedMoodRing] = useState<string | null>(null)
+  const summaryCardRef = useRef<any>(null)
 
   // ---- All mood counts ----
   const moodCounts = useMemo(() => {
@@ -762,20 +771,6 @@ function EmotionAnalyticsModal({
     return maxIdx
   }, [timeBuckets])
 
-  // ---- Mood by capture type ----
-  const typeData = useMemo(() => {
-    const types = ['photo', 'video', 'voice', 'write']
-    return types.map(type => {
-      const typeMoments = moments.filter(m => m.type === type)
-      const counts: Record<string, number> = {}
-      typeMoments.forEach(m => {
-        m.moods?.forEach(mood => { counts[mood] = (counts[mood] || 0) + 1 })
-      })
-      const total = Object.values(counts).reduce((a, b) => a + b, 0)
-      const topMood = Object.entries(counts).sort((a, b) => b[1] - a[1])[0]?.[0]
-      return { type, count: typeMoments.length, moodCounts: counts, total, topMood }
-    }).filter(t => t.count > 0)
-  }, [moments])
 
   // ---- Summary text ----
   const summary = useMemo(() => {
@@ -813,13 +808,28 @@ function EmotionAnalyticsModal({
     return [c1, c2]
   }, [sortedMoods])
 
+  // ---- Mood by capture type ----
+  const typeData = useMemo(() => {
+    const types = ['photo', 'video', 'voice', 'write']
+    return types.map(type => {
+      const typeMoments = moments.filter(m => m.type === type)
+      const counts: Record<string, number> = {}
+      typeMoments.forEach(m => {
+        m.moods?.forEach(mood => { counts[mood] = (counts[mood] || 0) + 1 })
+      })
+      const total = Object.values(counts).reduce((a, b) => a + b, 0)
+      const topMood = Object.entries(counts).sort((a, b) => b[1] - a[1])[0]?.[0]
+      return { type, count: typeMoments.length, moodCounts: counts, total, topMood }
+    }).filter(t => t.count > 0)
+  }, [moments])
+
   // ---- Section header helper ----
   const sectionHeader = (title: string, subtitle: string) => (
-    <View style={{ marginBottom: 14 }}>
-      <Text style={{ fontSize: 17, fontWeight: '700', color: isDark ? '#ffffff' : '#111827' }}>
+    <View style={{ marginBottom: 16 }}>
+      <Text style={{ fontSize: 16, fontWeight: '700', color: isDark ? '#ffffff' : '#111827', letterSpacing: 0.2 }}>
         {title}
       </Text>
-      <Text style={{ fontSize: 13, color: isDark ? 'rgba(255,255,255,0.4)' : '#9ca3af', marginTop: 2, fontStyle: 'italic' }}>
+      <Text style={{ fontSize: 13, color: isDark ? 'rgba(255,255,255,0.4)' : '#9ca3af', marginTop: 3 }}>
         {subtitle}
       </Text>
     </View>
@@ -890,50 +900,365 @@ function EmotionAnalyticsModal({
               contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 24, paddingBottom: 50 }}
               showsVerticalScrollIndicator={false}
             >
-              {/* === 1. Your Emotional Palette === */}
-              {sectionHeader('Your Emotional Palette', 'Every feeling you\'ve honored.')}
-              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 8 }}>
-                {sortedMoods.map(([mood, count]) => {
-                  const size = Math.min(28 + Math.log2(count) * 8, 56)
-                  return (
-                    <View key={mood} style={{
-                      width: size, height: size, borderRadius: size / 2,
-                      backgroundColor: MOOD_COLORS[mood] || '#6b7280',
-                      alignItems: 'center', justifyContent: 'center',
-                    }}>
-                      <Text style={{
-                        fontSize: size < 36 ? 7 : 9, fontWeight: '600',
-                        color: '#ffffff', textTransform: 'capitalize', textAlign: 'center',
-                      }} numberOfLines={1}>
-                        {mood}
-                      </Text>
-                    </View>
-                  )
-                })}
+              {/* === Summary Hero === */}
+              <ViewShot ref={summaryCardRef} options={{ format: 'png', quality: 1 }}>
+                <LinearGradient
+                  colors={[`${summaryGradient[0]}22`, `${summaryGradient[1]}22`]}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 1 }}
+                  style={{ borderRadius: 22, padding: 22, marginBottom: 8 }}
+                >
+                  <Sparkles size={18} color={summaryGradient[0]} style={{ marginBottom: 12 }} />
+                  <Text style={{
+                    fontSize: 17, lineHeight: 26, fontWeight: '500',
+                    color: isDark ? 'rgba(255,255,255,0.9)' : '#1f2937',
+                  }}>
+                    {summary}
+                  </Text>
+                </LinearGradient>
+              </ViewShot>
+
+              {/* CTAs */}
+              <View style={{ flexDirection: 'row', gap: 10, marginBottom: 36 }}>
+                <TouchableOpacity
+                  activeOpacity={0.8}
+                  onPress={() => {
+                    if (onTalkToBloom) {
+                      onClose()
+                      setTimeout(() => onTalkToBloom(summary), 300)
+                    }
+                  }}
+                  style={{
+                    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+                    paddingVertical: 12, borderRadius: 14,
+                    backgroundColor: isDark ? 'rgba(16,185,129,0.15)' : 'rgba(16,185,129,0.1)',
+                  }}
+                >
+                  <MessageCircle size={16} color="#10b981" />
+                  <Text style={{ fontSize: 14, fontWeight: '600', color: '#10b981' }}>
+                    Talk about it
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  activeOpacity={0.8}
+                  onPress={async () => {
+                    try {
+                      if (summaryCardRef.current) {
+                        const uri = await captureRef(summaryCardRef, { format: 'png', quality: 1 })
+                        const isAvailable = await Sharing.isAvailableAsync()
+                        if (isAvailable) {
+                          await Sharing.shareAsync(uri)
+                        } else {
+                          await Share.share({ message: summary })
+                        }
+                      }
+                    } catch {
+                      await Share.share({ message: summary })
+                    }
+                  }}
+                  style={{
+                    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+                    paddingVertical: 12, borderRadius: 14,
+                    backgroundColor: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)',
+                  }}
+                >
+                  <Share2 size={16} color={isDark ? 'rgba(255,255,255,0.6)' : '#6b7280'} />
+                  <Text style={{ fontSize: 14, fontWeight: '600', color: isDark ? 'rgba(255,255,255,0.6)' : '#6b7280' }}>
+                    Share
+                  </Text>
+                </TouchableOpacity>
               </View>
-              <Text style={{ fontSize: 12, color: theme.textFaint, marginBottom: 28 }}>
-                You've named {uniqueMoodCount} different emotion{uniqueMoodCount !== 1 ? 's' : ''} across {moments.length} moments.
-              </Text>
+
+              {/* === 1. Your Emotional Palette — rings + legend === */}
+              {sectionHeader('Your Emotional Palette', 'Tap a ring to explore')}
+              {(() => {
+                const MOOD_HINTS: Record<string, string> = {
+                  grateful: 'Appreciation for what\'s good',
+                  peaceful: 'Inner calm and stillness',
+                  joyful: 'Pure happiness and delight',
+                  inspired: 'Sparked with new energy',
+                  loved: 'Feeling connected and cared for',
+                  calm: 'Settled and at ease',
+                  hopeful: 'Looking forward with optimism',
+                  proud: 'Recognizing your own growth',
+                  overwhelmed: 'When it all feels like a lot',
+                  tired: 'Your body asking for rest',
+                  uncertain: 'Navigating the unknown',
+                }
+                const top5 = sortedMoods.slice(0, 5)
+                const totalTags = sortedMoods.reduce((sum, [, c]) => sum + c, 0)
+                const ringCount = top5.length
+                const ringWidth = 14
+                const ringGap = 5
+                const innerRadius = 28
+                const outerDiameter = innerRadius * 2 + ringCount * (ringWidth * 2 + ringGap * 2)
+                const containerSize = Math.min(outerDiameter, SCREEN_WIDTH - 80)
+                const rings = top5.map(([mood, count], i) => {
+                  const size = containerSize - i * (ringWidth * 2 + ringGap * 2)
+                  return {
+                    mood, count, size,
+                    color: MOOD_COLORS[mood] || '#6b7280',
+                    pct: Math.round((count / totalTags) * 100),
+                  }
+                })
+
+                // Build insight for selected mood
+                const selectedInsight = (() => {
+                  if (!selectedMoodRing) return null
+                  const color = MOOD_COLORS[selectedMoodRing] || '#6b7280'
+                  const count = moodCounts[selectedMoodRing] || 0
+                  const pct = Math.round((count / totalTags) * 100)
+                  const hint = MOOD_HINTS[selectedMoodRing] || 'A feeling you honored'
+
+                  // Peak time of day for this mood
+                  const hourCounts = [0, 0, 0, 0] // morning, afternoon, evening, night
+                  const bucketLabels = ['morning', 'afternoon', 'evening', 'night']
+                  moments.forEach(m => {
+                    if (!m.moods?.includes(selectedMoodRing)) return
+                    const h = new Date(m.created_at).getHours()
+                    if (h >= 5 && h < 12) hourCounts[0]++
+                    else if (h >= 12 && h < 17) hourCounts[1]++
+                    else if (h >= 17 && h < 21) hourCounts[2]++
+                    else hourCounts[3]++
+                  })
+                  const peakIdx = hourCounts.indexOf(Math.max(...hourCounts))
+                  const peakTime = bucketLabels[peakIdx]
+
+                  // This week vs last week
+                  const now = new Date()
+                  const weekAgo = new Date(now); weekAgo.setDate(weekAgo.getDate() - 7)
+                  const twoWeeksAgo = new Date(now); twoWeeksAgo.setDate(twoWeeksAgo.getDate() - 14)
+                  let thisWeek = 0, lastWeek = 0
+                  moments.forEach(m => {
+                    if (!m.moods?.includes(selectedMoodRing)) return
+                    const d = new Date(m.created_at)
+                    if (d >= weekAgo) thisWeek++
+                    else if (d >= twoWeeksAgo) lastWeek++
+                  })
+                  let trend = 'steady'
+                  if (thisWeek > lastWeek) trend = 'rising'
+                  else if (thisWeek < lastWeek) trend = 'easing'
+
+                  // Latest snippet
+                  const latest = moments.find(m => m.moods?.includes(selectedMoodRing))
+                  const snippet = latest?.text_content || latest?.caption || null
+
+                  return { color, count, pct, hint, peakTime, trend, thisWeek, lastWeek, snippet }
+                })()
+
+                return (
+                  <>
+                    {/* Ring visual */}
+                    <View style={{ alignItems: 'center', justifyContent: 'center', height: containerSize, marginBottom: 20 }}>
+                      {rings.map((ring) => {
+                        const isSelected = selectedMoodRing === ring.mood
+                        return (
+                          <TouchableOpacity
+                            key={ring.mood}
+                            activeOpacity={0.7}
+                            onPress={() => setSelectedMoodRing(prev => prev === ring.mood ? null : ring.mood)}
+                            style={{
+                              position: 'absolute',
+                              width: ring.size, height: ring.size,
+                              borderRadius: ring.size / 2,
+                              borderWidth: isSelected ? ringWidth + 3 : ringWidth,
+                              borderColor: isSelected ? `${ring.color}BB` : `${ring.color}50`,
+                              backgroundColor: 'transparent',
+                            }}
+                          />
+                        )
+                      })}
+                      {/* Center label */}
+                      <View style={{ alignItems: 'center' }}>
+                        {selectedMoodRing ? (
+                          <Text style={{
+                            fontSize: 14, fontWeight: '700', textTransform: 'capitalize',
+                            color: MOOD_COLORS[selectedMoodRing] || theme.textFaint,
+                          }}>
+                            {selectedMoodRing}
+                          </Text>
+                        ) : (
+                          <>
+                            <Text style={{ fontSize: 20, fontWeight: '700', color: isDark ? '#ffffff' : '#111827' }}>
+                              {totalTags}
+                            </Text>
+                            <Text style={{ fontSize: 11, color: theme.textFaint, marginTop: 1 }}>
+                              feelings
+                            </Text>
+                          </>
+                        )}
+                      </View>
+                    </View>
+
+                    {/* Insight card for selected mood */}
+                    {selectedInsight && selectedMoodRing && (
+                      <LinearGradient
+                        colors={[`${selectedInsight.color}18`, `${selectedInsight.color}08`]}
+                        start={{ x: 0, y: 0 }}
+                        end={{ x: 1, y: 1 }}
+                        style={{
+                          borderRadius: 22, padding: 22, marginBottom: 20,
+                          shadowColor: selectedInsight.color,
+                          shadowOffset: { width: 0, height: 4 },
+                          shadowOpacity: 0.15, shadowRadius: 12, elevation: 4,
+                        }}
+                      >
+                        {/* Mood dot + name + hint */}
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 6 }}>
+                          <View style={{
+                            width: 14, height: 14, borderRadius: 7,
+                            backgroundColor: selectedInsight.color,
+                            shadowColor: selectedInsight.color,
+                            shadowOffset: { width: 0, height: 0 },
+                            shadowOpacity: 0.5, shadowRadius: 6,
+                          }} />
+                          <Text style={{
+                            fontSize: 18, fontWeight: '700', textTransform: 'capitalize',
+                            color: isDark ? '#ffffff' : '#111827',
+                          }}>
+                            {selectedMoodRing}
+                          </Text>
+                        </View>
+                        <Text style={{
+                          fontSize: 14, color: isDark ? 'rgba(255,255,255,0.5)' : '#6b7280',
+                          marginBottom: 16, lineHeight: 20,
+                        }}>
+                          {selectedInsight.hint}
+                        </Text>
+
+                        {/* Soft narrative line */}
+                        <Text style={{
+                          fontSize: 14, lineHeight: 22, fontWeight: '500',
+                          color: isDark ? 'rgba(255,255,255,0.75)' : '#374151',
+                          marginBottom: 16,
+                        }}>
+                          You've felt {selectedMoodRing} {selectedInsight.count} time{selectedInsight.count !== 1 ? 's' : ''} — that's {selectedInsight.pct}% of your moments.{' '}
+                          It visits you most in the {selectedInsight.peakTime},{' '}
+                          {selectedInsight.trend === 'rising' ? 'and it\'s been growing this week.' : selectedInsight.trend === 'easing' ? 'and it\'s been quieter this week.' : 'holding steady lately.'}
+                        </Text>
+
+                        {/* Snippet */}
+                        {selectedInsight.snippet && (
+                          <View style={{
+                            backgroundColor: isDark ? 'rgba(255,255,255,0.05)' : 'rgba(255,255,255,0.7)',
+                            borderRadius: 14, padding: 14,
+                          }}>
+                            <Text style={{
+                              fontSize: 22, lineHeight: 22, color: `${selectedInsight.color}60`,
+                              fontWeight: '700', marginBottom: 2,
+                            }}>
+                              "
+                            </Text>
+                            <Text style={{
+                              fontSize: 14, color: isDark ? 'rgba(255,255,255,0.7)' : '#4b5563',
+                              lineHeight: 20, fontStyle: 'italic',
+                            }} numberOfLines={3}>
+                              {selectedInsight.snippet}
+                            </Text>
+                          </View>
+                        )}
+                      </LinearGradient>
+                    )}
+
+                    {/* Legend rows for top 5 */}
+                    <View style={{ gap: 10, marginBottom: 14 }}>
+                      {top5.map(([mood, count]) => {
+                        const color = MOOD_COLORS[mood] || '#6b7280'
+                        const pct = Math.round((count / totalTags) * 100)
+                        const isSelected = selectedMoodRing === mood
+                        return (
+                          <TouchableOpacity
+                            key={mood}
+                            activeOpacity={0.7}
+                            onPress={() => setSelectedMoodRing(prev => prev === mood ? null : mood)}
+                            style={{
+                              flexDirection: 'row', alignItems: 'center',
+                              paddingVertical: 4, paddingHorizontal: isSelected ? 8 : 0,
+                              borderRadius: 10,
+                              backgroundColor: isSelected ? `${color}14` : 'transparent',
+                            }}
+                          >
+                            <View style={{
+                              width: 12, height: 12, borderRadius: 3, marginRight: 10,
+                              backgroundColor: isSelected ? color : `${color}50`,
+                            }} />
+                            <Text style={{
+                              fontSize: 14, fontWeight: isSelected ? '700' : '600', textTransform: 'capitalize', flex: 1,
+                              color: isSelected ? color : (isDark ? 'rgba(255,255,255,0.85)' : '#374151'),
+                            }}>
+                              {mood}
+                            </Text>
+                            <Text style={{ fontSize: 13, color: theme.textFaint, marginRight: 4 }}>
+                              {pct}%
+                            </Text>
+                            <Text style={{ fontSize: 12, color: isDark ? 'rgba(255,255,255,0.25)' : '#c8c8c8', width: 28, textAlign: 'right' }}>
+                              {count}
+                            </Text>
+                          </TouchableOpacity>
+                        )
+                      })}
+                    </View>
+
+                    {/* Remaining moods as tags */}
+                    {sortedMoods.length > 5 && (
+                      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 6 }}>
+                        {sortedMoods.slice(5).map(([mood, count]) => {
+                          const color = MOOD_COLORS[mood] || '#6b7280'
+                          const isSelected = selectedMoodRing === mood
+                          return (
+                            <TouchableOpacity
+                              key={mood}
+                              activeOpacity={0.7}
+                              onPress={() => setSelectedMoodRing(prev => prev === mood ? null : mood)}
+                              style={{
+                                flexDirection: 'row', alignItems: 'center', gap: 6,
+                                paddingHorizontal: 12, paddingVertical: 6, borderRadius: 999,
+                                backgroundColor: isSelected ? `${color}30` : `${color}1A`,
+                              }}
+                            >
+                              <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: color }} />
+                              <Text style={{
+                                fontSize: 13, fontWeight: isSelected ? '700' : '500', textTransform: 'capitalize',
+                                color: isSelected ? color : (isDark ? 'rgba(255,255,255,0.8)' : '#374151'),
+                              }}>
+                                {mood}
+                              </Text>
+                              <Text style={{ fontSize: 11, color: isDark ? 'rgba(255,255,255,0.3)' : '#b0b0b0' }}>
+                                {count}
+                              </Text>
+                            </TouchableOpacity>
+                          )
+                        })}
+                      </View>
+                    )}
+
+                    <Text style={{ fontSize: 13, color: theme.textFaint, textAlign: 'center', marginTop: 14, marginBottom: 36 }}>
+                      {uniqueMoodCount} emotion{uniqueMoodCount !== 1 ? 's' : ''} across {moments.length} moments
+                    </Text>
+                  </>
+                )
+              })()}
 
               {/* === 2. Emotion River — 4 Weeks === */}
-              {sectionHeader('How You\'ve Been Feeling', 'Your emotional flow, week by week.')}
-              <View style={{ gap: 10, marginBottom: 28 }}>
+              {sectionHeader('How You\'ve Been Feeling', 'Your emotional flow, week by week')}
+              <View style={{ gap: 12, marginBottom: 36 }}>
                 {weeklyMoodData.map((week, i) => (
                   <View key={i}>
-                    <Text style={{ fontSize: 11, color: theme.textFaint, marginBottom: 4, fontWeight: '500' }}>
+                    <Text style={{ fontSize: 12, color: theme.textFaint, marginBottom: 5, fontWeight: '500' }}>
                       {week.label}
                     </Text>
                     {week.total === 0 ? (
                       <View style={{
-                        height: 20, borderRadius: 10,
+                        height: 24, borderRadius: 12,
                         borderWidth: 1, borderStyle: 'dashed',
-                        borderColor: isDark ? 'rgba(255,255,255,0.15)' : 'rgba(0,0,0,0.12)',
+                        borderColor: isDark ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.08)',
                         alignItems: 'center', justifyContent: 'center',
                       }}>
-                        <Text style={{ fontSize: 10, color: theme.textFaint }}>No moments this week</Text>
+                        <Text style={{ fontSize: 11, color: theme.textFaint }}>No moments</Text>
                       </View>
                     ) : (
-                      <View style={{ flexDirection: 'row', height: 20, borderRadius: 10, overflow: 'hidden' }}>
+                      <View style={{ flexDirection: 'row', height: 24, borderRadius: 12, overflow: 'hidden' }}>
                         {Object.entries(week.moodCounts)
                           .sort((a, b) => b[1] - a[1])
                           .map(([mood, count]) => (
@@ -949,50 +1274,51 @@ function EmotionAnalyticsModal({
               </View>
 
               {/* === 3. Brightest Days === */}
-              {sectionHeader('Your Brightest Days', 'The days you shined.')}
-              <View style={{ flexDirection: 'row', gap: 10, marginBottom: 12 }}>
+              {sectionHeader('Your Brightest Days', 'The days you shined')}
+              <View style={{ flexDirection: 'row', gap: 10, marginBottom: 14 }}>
                 <View style={{
-                  flex: 1, paddingVertical: 10, paddingHorizontal: 14, borderRadius: 14,
+                  flex: 1, paddingVertical: 12, paddingHorizontal: 16, borderRadius: 16,
                   backgroundColor: theme.toggleBg,
                 }}>
-                  <Text style={{ fontSize: 20, fontWeight: '700', color: isDark ? '#ffffff' : '#111827' }}>
+                  <Text style={{ fontSize: 22, fontWeight: '700', color: isDark ? '#ffffff' : '#111827' }}>
                     {streakData.current}
                   </Text>
-                  <Text style={{ fontSize: 11, color: theme.textFaint, marginTop: 2 }}>Current streak</Text>
+                  <Text style={{ fontSize: 12, color: theme.textFaint, marginTop: 3 }}>Current streak</Text>
                 </View>
                 <View style={{
-                  flex: 1, paddingVertical: 10, paddingHorizontal: 14, borderRadius: 14,
+                  flex: 1, paddingVertical: 12, paddingHorizontal: 16, borderRadius: 16,
                   backgroundColor: theme.toggleBg,
                 }}>
-                  <Text style={{ fontSize: 20, fontWeight: '700', color: isDark ? '#ffffff' : '#111827' }}>
+                  <Text style={{ fontSize: 22, fontWeight: '700', color: isDark ? '#ffffff' : '#111827' }}>
                     {streakData.longest}
                   </Text>
-                  <Text style={{ fontSize: 11, color: theme.textFaint, marginTop: 2 }}>Longest streak</Text>
+                  <Text style={{ fontSize: 12, color: theme.textFaint, marginTop: 3 }}>Longest streak</Text>
                 </View>
               </View>
               {topDays.length > 0 && (
                 <ScrollView
                   horizontal showsHorizontalScrollIndicator={false}
                   contentContainerStyle={{ gap: 10, paddingBottom: 4 }}
-                  style={{ marginBottom: 28 }}
+                  style={{ marginBottom: 36 }}
                 >
                   {topDays.map(day => {
                     const moodColor = day.dominant ? (MOOD_COLORS[day.dominant] || '#6b7280') : theme.textFaint
                     const dateObj = new Date(day.date + 'T12:00:00')
                     return (
                       <View key={day.date} style={{
-                        width: 160, borderRadius: 16, padding: 14,
-                        backgroundColor: theme.cardBg, borderWidth: 2, borderColor: moodColor,
+                        width: 170, borderRadius: 18, padding: 16,
+                        backgroundColor: theme.cardBg,
+                        borderLeftWidth: 4, borderLeftColor: moodColor,
                       }}>
-                        <Text style={{ fontSize: 13, fontWeight: '600', color: isDark ? '#ffffff' : '#111827' }}>
+                        <Text style={{ fontSize: 14, fontWeight: '600', color: isDark ? '#ffffff' : '#111827' }}>
                           {dateObj.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' })}
                         </Text>
-                        <Text style={{ fontSize: 11, color: theme.textFaint, marginTop: 4 }}>
+                        <Text style={{ fontSize: 12, color: theme.textFaint, marginTop: 4 }}>
                           {day.count} moment{day.count !== 1 ? 's' : ''}
                         </Text>
                         {day.snippet ? (
-                          <Text style={{ fontSize: 11, color: theme.textMuted, marginTop: 6, lineHeight: 15 }} numberOfLines={2}>
-                            &ldquo;{day.snippet}&rdquo;
+                          <Text style={{ fontSize: 12, color: theme.textMuted, marginTop: 8, lineHeight: 17 }} numberOfLines={2}>
+                            "{day.snippet}"
                           </Text>
                         ) : null}
                       </View>
@@ -1002,8 +1328,8 @@ function EmotionAnalyticsModal({
               )}
 
               {/* === 4. Time of Day === */}
-              {sectionHeader('When You Feel Most', 'Your emotional rhythm through the day.')}
-              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 28 }}>
+              {sectionHeader('When You Feel Most', 'Your emotional rhythm through the day')}
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 36 }}>
                 {timeBuckets.map((bucket, i) => {
                   const isPeak = i === peakBucketIndex && bucket.moments.length > 0
                   const topMoods = Object.entries(bucket.moodCounts)
@@ -1013,33 +1339,33 @@ function EmotionAnalyticsModal({
                   return (
                     <View key={i} style={{
                       width: (SCREEN_WIDTH - 40 - 10) / 2,
-                      paddingVertical: 14, paddingHorizontal: 14, borderRadius: 16,
+                      paddingVertical: 16, paddingHorizontal: 16, borderRadius: 18,
                       backgroundColor: isPeak
-                        ? (isDark ? 'rgba(245,158,11,0.12)' : 'rgba(245,158,11,0.08)')
+                        ? (isDark ? 'rgba(245,158,11,0.12)' : 'rgba(245,158,11,0.06)')
                         : theme.toggleBg,
                       borderWidth: isPeak ? 1 : 0,
-                      borderColor: isPeak ? 'rgba(245,158,11,0.3)' : 'transparent',
+                      borderColor: isPeak ? 'rgba(245,158,11,0.25)' : 'transparent',
                     }}>
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 6 }}>
-                        <TimeIcon size={14} color={theme.textMuted} />
-                        <Text style={{ fontSize: 13, fontWeight: '600', color: isDark ? '#ffffff' : '#111827' }}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+                        <TimeIcon size={14} color={isPeak ? '#f59e0b' : theme.textMuted} />
+                        <Text style={{ fontSize: 14, fontWeight: '600', color: isDark ? '#ffffff' : '#111827' }}>
                           {bucket.label}
                         </Text>
                       </View>
-                      <Text style={{ fontSize: 11, color: theme.textFaint, marginBottom: 8 }}>
+                      <Text style={{ fontSize: 12, color: theme.textFaint, marginBottom: 10 }}>
                         {bucket.moments.length} moment{bucket.moments.length !== 1 ? 's' : ''}
                       </Text>
-                      <View style={{ flexDirection: 'row', gap: 4 }}>
+                      <View style={{ flexDirection: 'row', gap: 5 }}>
                         {topMoods.map(([mood]) => (
                           <View key={mood} style={{
-                            width: 10, height: 10, borderRadius: 5,
+                            width: 12, height: 12, borderRadius: 6,
                             backgroundColor: MOOD_COLORS[mood] || '#6b7280',
                           }} />
                         ))}
                       </View>
                       {isPeak && (
-                        <Text style={{ fontSize: 10, color: '#f59e0b', fontWeight: '600', marginTop: 8 }}>
-                          Your most expressive time
+                        <Text style={{ fontSize: 11, color: '#f59e0b', fontWeight: '600', marginTop: 10 }}>
+                          Peak expressive time
                         </Text>
                       )}
                     </View>
@@ -1048,30 +1374,34 @@ function EmotionAnalyticsModal({
               </View>
 
               {/* === 5. Mood & Moments — Expression by Type === */}
-              {sectionHeader('Mood & Moments', 'How you choose to express each feeling.')}
-              <View style={{ gap: 12, marginBottom: 28 }}>
+              {sectionHeader('Mood & Moments', 'How you choose to express each feeling')}
+              <View style={{ gap: 14, marginBottom: 36 }}>
                 {typeData.map(({ type, count, moodCounts: mc, total, topMood }) => {
                   const sorted = Object.entries(mc).sort((a, b) => b[1] - a[1])
                   return (
-                    <View key={type} style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+                    <View key={type} style={{
+                      flexDirection: 'row', alignItems: 'center', gap: 14,
+                      backgroundColor: theme.toggleBg, borderRadius: 16,
+                      paddingVertical: 14, paddingHorizontal: 16,
+                    }}>
                       <LinearGradient
                         colors={typeGradient(type)}
                         style={{
-                          width: 36, height: 36, borderRadius: 12,
+                          width: 40, height: 40, borderRadius: 14,
                           alignItems: 'center', justifyContent: 'center',
                         }}
                       >
-                        <TypeIcon type={type} size={16} />
+                        <TypeIcon type={type} size={18} />
                       </LinearGradient>
                       <View style={{ flex: 1 }}>
-                        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
-                          <Text style={{ fontSize: 13, fontWeight: '600', color: isDark ? '#ffffff' : '#111827', textTransform: 'capitalize' }}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                          <Text style={{ fontSize: 14, fontWeight: '600', color: isDark ? '#ffffff' : '#111827', textTransform: 'capitalize' }}>
                             {type}
                           </Text>
-                          <Text style={{ fontSize: 11, color: theme.textFaint }}>{count}</Text>
+                          <Text style={{ fontSize: 12, color: theme.textFaint }}>{count}</Text>
                         </View>
                         {total > 0 && (
-                          <View style={{ flexDirection: 'row', height: 6, borderRadius: 3, overflow: 'hidden' }}>
+                          <View style={{ flexDirection: 'row', height: 8, borderRadius: 4, overflow: 'hidden' }}>
                             {sorted.map(([mood, c]) => (
                               <View key={mood} style={{
                                 flex: c / total, minWidth: 3,
@@ -1081,7 +1411,7 @@ function EmotionAnalyticsModal({
                           </View>
                         )}
                         {topMood && (
-                          <Text style={{ fontSize: 10, color: theme.textFaint, marginTop: 4, fontStyle: 'italic' }}>
+                          <Text style={{ fontSize: 11, color: theme.textFaint, marginTop: 6 }}>
                             You tend to {typeVerbs[type] || type} when you feel {topMood}.
                           </Text>
                         )}
@@ -1091,26 +1421,13 @@ function EmotionAnalyticsModal({
                 })}
               </View>
 
-              {/* === 6. A Gentle Summary === */}
-              {sectionHeader('A Gentle Summary', 'Your story, in a few words.')}
-              <LinearGradient
-                colors={[`${summaryGradient[0]}20`, `${summaryGradient[1]}20`]}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 1 }}
-                style={{
-                  borderRadius: 20, padding: 20,
-                  borderWidth: 1,
-                  borderColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)',
-                }}
-              >
-                <Sparkles size={22} color={summaryGradient[0]} style={{ marginBottom: 12 }} />
-                <Text style={{
-                  fontSize: 15, lineHeight: 22, fontWeight: '500',
-                  color: isDark ? 'rgba(255,255,255,0.85)' : '#1f2937',
-                }}>
-                  {summary}
-                </Text>
-              </LinearGradient>
+              {/* === Closing === */}
+              <Text style={{
+                fontSize: 13, color: theme.textFaint, textAlign: 'center',
+                marginTop: 10, marginBottom: 8,
+              }}>
+                Every feeling you name makes you stronger.
+              </Text>
             </ScrollView>
           )}
         </Pressable>
@@ -2361,6 +2678,10 @@ export default function MomentsScreen() {
         isDark={isDark}
         moments={moments}
         theme={theme}
+        onTalkToBloom={() => {
+          setIsAnalyticsOpen(false)
+          setTimeout(() => setIsBloomOpen(true), 350)
+        }}
       />
     </SafeAreaView>
   )
