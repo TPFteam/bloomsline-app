@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useMemo, useRef } from 'react'
 import {
   View,
   Text,
@@ -68,10 +68,16 @@ import {
   Smile,
   Shield,
   Check,
+  Pause,
+  Maximize2,
+  Volume2,
+  VolumeX,
 } from 'lucide-react-native'
 import { useAuth } from '@/lib/auth-context'
 import { supabase } from '@/lib/supabase'
 import { fetchMemberRituals, fetchTodayCompletions, type MemberRitual, type RitualCompletion } from '@/lib/services/rituals'
+import * as VideoThumbnails from 'expo-video-thumbnails'
+import { Video, ResizeMode } from 'expo-av'
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window')
 
@@ -118,7 +124,108 @@ type MomentItem = {
   type: string
   caption: string | null
   media_url: string | null
+  thumbnail_url: string | null
   text_content: string | null
+}
+
+function FullscreenVideoPlayer({ uri }: { uri: string }) {
+  const videoRef = useRef<Video>(null)
+  const [isPlaying, setIsPlaying] = useState(true)
+  const [isMuted, setIsMuted] = useState(false)
+  const [showControls, setShowControls] = useState(true)
+
+  useEffect(() => {
+    if (!showControls) return
+    const timer = setTimeout(() => setShowControls(false), 3000)
+    return () => clearTimeout(timer)
+  }, [showControls, isPlaying])
+
+  const togglePlay = async () => {
+    if (!videoRef.current) return
+    if (isPlaying) await videoRef.current.pauseAsync()
+    else await videoRef.current.playAsync()
+    setIsPlaying(!isPlaying)
+    setShowControls(true)
+  }
+
+  const toggleMute = async () => {
+    if (!videoRef.current) return
+    await videoRef.current.setIsMutedAsync(!isMuted)
+    setIsMuted(!isMuted)
+    setShowControls(true)
+  }
+
+  const goFullscreen = async () => {
+    if (!videoRef.current) return
+    await (videoRef.current as any).presentFullscreenPlayer()
+    setShowControls(true)
+  }
+
+  return (
+    <View style={{ flex: 1, backgroundColor: '#000' }}>
+      <Video
+        ref={videoRef}
+        source={{ uri }}
+        style={{ flex: 1 }}
+        resizeMode={ResizeMode.CONTAIN}
+        shouldPlay
+        isLooping
+        isMuted={isMuted}
+      />
+      <Pressable
+        onPress={() => setShowControls(prev => !prev)}
+        style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }}
+      >
+        {showControls && (
+          <>
+            {/* Center play/pause */}
+            <TouchableOpacity
+              onPress={togglePlay}
+              style={{
+                position: 'absolute', top: '50%', left: '50%',
+                marginTop: -28, marginLeft: -28,
+                width: 56, height: 56, borderRadius: 28,
+                backgroundColor: 'rgba(0,0,0,0.5)',
+                alignItems: 'center', justifyContent: 'center',
+              }}
+            >
+              {isPlaying
+                ? <Pause size={26} color="#fff" fill="#fff" />
+                : <Play size={26} color="#fff" fill="#fff" style={{ marginLeft: 2 }} />
+              }
+            </TouchableOpacity>
+
+            {/* Bottom controls — mute + fullscreen */}
+            <View style={{
+              position: 'absolute', bottom: 12, left: 16, right: 16,
+              flexDirection: 'row', justifyContent: 'space-between',
+            }}>
+              <TouchableOpacity
+                onPress={toggleMute}
+                style={{
+                  width: 36, height: 36, borderRadius: 18,
+                  backgroundColor: 'rgba(0,0,0,0.5)',
+                  alignItems: 'center', justifyContent: 'center',
+                }}
+              >
+                {isMuted ? <VolumeX size={18} color="#fff" /> : <Volume2 size={18} color="#fff" />}
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={goFullscreen}
+                style={{
+                  width: 36, height: 36, borderRadius: 18,
+                  backgroundColor: 'rgba(0,0,0,0.5)',
+                  alignItems: 'center', justifyContent: 'center',
+                }}
+              >
+                <Maximize2 size={18} color="#fff" />
+              </TouchableOpacity>
+            </View>
+          </>
+        )}
+      </Pressable>
+    </View>
+  )
 }
 
 export default function HomeScreen() {
@@ -164,7 +271,7 @@ export default function HomeScreen() {
     const [momentsRes, anchorsRes, logsRes, ritualsData, completionsData] = await Promise.all([
       supabase
         .from('moments')
-        .select('id, created_at, moods, type, caption, media_url, text_content')
+        .select('id, created_at, moods, type, caption, media_url, thumbnail_url, text_content')
         .eq('user_id', user.id)
         .gte('created_at', dayStart.toISOString())
         .lte('created_at', dayEnd.toISOString())
@@ -279,6 +386,26 @@ export default function HomeScreen() {
   const currentHour = currentTime.getHours() + currentTime.getMinutes() / 60
   const timePosition = hourToPosition(currentHour)
   const flowWidth = SCREEN_WIDTH - 80 // padding
+
+  // Generate video thumbnails
+  const [videoThumbs, setVideoThumbs] = useState<Record<string, string>>({})
+  const videoMoments = useMemo(() => moments.filter(m => m.type === 'video' && m.media_url), [moments])
+  useEffect(() => {
+    let cancelled = false
+    async function gen() {
+      const thumbs: Record<string, string> = {}
+      for (const m of videoMoments) {
+        try {
+          const { uri } = await VideoThumbnails.getThumbnailAsync(m.media_url!, { time: 500 })
+          if (cancelled) return
+          thumbs[m.id] = uri
+        } catch { /* skip */ }
+      }
+      if (!cancelled) setVideoThumbs(thumbs)
+    }
+    if (videoMoments.length > 0) gen()
+    return () => { cancelled = true }
+  }, [videoMoments])
 
   if (loading) {
     return (
@@ -599,6 +726,9 @@ export default function HomeScreen() {
                     const colors = getMoodColors(m.moods?.[0])
 
                     const isPhoto = m.type === 'photo' && m.media_url
+                    const isVideo = m.type === 'video'
+                    const videoThumb = isVideo ? (m.thumbnail_url || videoThumbs[m.id]) : null
+                    const isCard = isPhoto || isVideo
 
                     return (
                       <TouchableOpacity
@@ -609,7 +739,7 @@ export default function HomeScreen() {
                           position: 'absolute',
                           left: `${x}%`, top: `${y}%`,
                           marginLeft: -16,
-                          marginTop: isPhoto ? -20 : -16,
+                          marginTop: isCard ? -20 : -16,
                         }}
                       >
                         {isPhoto ? (
@@ -625,6 +755,40 @@ export default function HomeScreen() {
                               style={{ width: '100%', height: '100%' }}
                               resizeMode="cover"
                             />
+                          </View>
+                        ) : isVideo ? (
+                          <View style={{
+                            width: 32, height: 40, borderRadius: 8,
+                            overflow: 'hidden',
+                            borderWidth: 2, borderColor: '#ffffff',
+                            shadowColor: '#000', shadowOffset: { width: 0, height: 2 },
+                            shadowOpacity: 0.15, shadowRadius: 4, elevation: 3,
+                          }}>
+                            {videoThumb ? (
+                              <Image
+                                source={{ uri: videoThumb }}
+                                style={{ width: '100%', height: '100%' }}
+                                resizeMode="cover"
+                              />
+                            ) : (
+                              <LinearGradient
+                                colors={[colors.from, colors.to]}
+                                style={{ width: '100%', height: '100%' }}
+                              />
+                            )}
+                            <View style={{
+                              position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
+                              alignItems: 'center', justifyContent: 'center',
+                              backgroundColor: 'rgba(0,0,0,0.2)',
+                            }}>
+                              <View style={{
+                                width: 18, height: 18, borderRadius: 9,
+                                backgroundColor: '#ffffff',
+                                alignItems: 'center', justifyContent: 'center',
+                              }}>
+                                <Play size={9} color="#111827" fill="#111827" style={{ marginLeft: 1 }} />
+                              </View>
+                            </View>
                           </View>
                         ) : (
                           <LinearGradient
@@ -921,45 +1085,64 @@ export default function HomeScreen() {
           const time = new Date(viewingMoment.created_at)
           const timeStr = time.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
           const hasImage = viewingMoment.type === 'photo' && viewingMoment.media_url
+          const hasVideo = viewingMoment.type === 'video' && viewingMoment.media_url
 
-          return hasImage ? (
-            /* Photo lightbox — dark backdrop */
-            <Pressable
-              style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.9)', justifyContent: 'center', alignItems: 'center' }}
-              onPress={() => setViewingMoment(null)}
-            >
-              <Pressable onPress={() => {}} style={{ width: '90%', maxWidth: 400 }}>
-                <TouchableOpacity
-                  onPress={() => setViewingMoment(null)}
-                  style={{
-                    alignSelf: 'flex-end', marginBottom: 12,
-                    width: 36, height: 36, borderRadius: 18,
-                    backgroundColor: 'rgba(255,255,255,0.15)',
-                    alignItems: 'center', justifyContent: 'center',
-                  }}
-                >
-                  <X size={20} color="#fff" />
-                </TouchableOpacity>
-                <Image
-                  source={{ uri: viewingMoment.media_url! }}
-                  style={{ width: '100%', aspectRatio: 3 / 4, borderRadius: 16, marginBottom: 16 }}
-                  resizeMode="cover"
-                />
-                <View style={{ alignItems: 'center' }}>
+          return hasImage || hasVideo ? (
+            /* Photo/Video lightbox — dark backdrop, reel-style */
+            <View style={{ flex: 1, backgroundColor: '#000' }}>
+              {/* Close button */}
+              <SafeAreaView edges={['top']} style={{ position: 'absolute', top: 0, left: 0, right: 0, zIndex: 10 }}>
+                <View style={{ flexDirection: 'row', justifyContent: 'flex-end', paddingHorizontal: 16, paddingTop: 8 }}>
+                  <TouchableOpacity
+                    onPress={() => setViewingMoment(null)}
+                    style={{
+                      width: 36, height: 36, borderRadius: 18,
+                      backgroundColor: 'rgba(255,255,255,0.15)',
+                      alignItems: 'center', justifyContent: 'center',
+                    }}
+                  >
+                    <X size={20} color="#fff" />
+                  </TouchableOpacity>
+                </View>
+              </SafeAreaView>
+
+              {/* Media — takes up available space */}
+              {hasVideo ? (
+                <FullscreenVideoPlayer uri={viewingMoment.media_url!} />
+              ) : (
+                <Pressable onPress={() => setViewingMoment(null)} style={{ flex: 1, justifyContent: 'center' }}>
+                  <Image
+                    source={{ uri: viewingMoment.media_url! }}
+                    style={{ width: '100%', flex: 1 }}
+                    resizeMode="contain"
+                  />
+                </Pressable>
+              )}
+
+              {/* Bottom info */}
+              <SafeAreaView edges={['bottom']} style={{ backgroundColor: '#000' }}>
+                <View style={{ paddingHorizontal: 20, paddingVertical: 12 }}>
                   {viewingMoment.moods?.[0] && (
-                    <Text style={{ color: '#fff', fontSize: 18, fontWeight: '700', textTransform: 'capitalize', marginBottom: 4 }}>
-                      {viewingMoment.moods[0]}
-                    </Text>
+                    <View style={{
+                      alignSelf: 'flex-start',
+                      backgroundColor: 'rgba(255,255,255,0.15)',
+                      borderRadius: 12, paddingHorizontal: 10, paddingVertical: 4,
+                      marginBottom: 6,
+                    }}>
+                      <Text style={{ color: '#fff', fontSize: 13, fontWeight: '600', textTransform: 'capitalize' }}>
+                        {viewingMoment.moods[0]}
+                      </Text>
+                    </View>
                   )}
                   {viewingMoment.caption && (
-                    <Text style={{ color: 'rgba(255,255,255,0.8)', fontSize: 15, textAlign: 'center', marginBottom: 4 }}>
+                    <Text style={{ color: 'rgba(255,255,255,0.85)', fontSize: 15, fontWeight: '500', marginBottom: 4 }}>
                       {viewingMoment.caption}
                     </Text>
                   )}
-                  <Text style={{ color: 'rgba(255,255,255,0.5)', fontSize: 13 }}>{timeStr}</Text>
+                  <Text style={{ color: 'rgba(255,255,255,0.4)', fontSize: 12 }}>{timeStr}</Text>
                 </View>
-              </Pressable>
-            </Pressable>
+              </SafeAreaView>
+            </View>
           ) : (
             /* Text/mood moment — white card */
             <Pressable

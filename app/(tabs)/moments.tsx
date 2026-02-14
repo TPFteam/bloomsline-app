@@ -22,6 +22,7 @@ import { LinearGradient } from 'expo-linear-gradient'
 import * as Sharing from 'expo-sharing'
 import { captureRef } from 'react-native-view-shot'
 import { useRouter, useFocusEffect } from 'expo-router'
+import { Video as AVVideo, ResizeMode } from 'expo-av'
 import {
   Plus,
   Camera,
@@ -42,6 +43,10 @@ import {
   Shuffle,
   Share2,
   MessageCircle,
+  Pause,
+  Maximize2,
+  Volume2,
+  VolumeX,
 } from 'lucide-react-native'
 import { useAuth } from '@/lib/auth-context'
 import { getMemberMoments, deleteMoment, type Moment } from '@/lib/services/moments'
@@ -2341,6 +2346,118 @@ function MasonryCard({
 }
 
 // ============================================
+// Video Player with custom controls
+// ============================================
+
+function VideoPlayer({ uri }: { uri: string }) {
+  const videoRef = useRef<AVVideo>(null)
+  const [isPlaying, setIsPlaying] = useState(true)
+  const [isMuted, setIsMuted] = useState(false)
+  const [showControls, setShowControls] = useState(true)
+
+  // Auto-hide controls after 3s
+  useEffect(() => {
+    if (!showControls) return
+    const timer = setTimeout(() => setShowControls(false), 3000)
+    return () => clearTimeout(timer)
+  }, [showControls, isPlaying])
+
+  const togglePlay = async () => {
+    if (!videoRef.current) return
+    if (isPlaying) {
+      await videoRef.current.pauseAsync()
+    } else {
+      await videoRef.current.playAsync()
+    }
+    setIsPlaying(!isPlaying)
+    setShowControls(true)
+  }
+
+  const toggleMute = async () => {
+    if (!videoRef.current) return
+    await videoRef.current.setIsMutedAsync(!isMuted)
+    setIsMuted(!isMuted)
+    setShowControls(true)
+  }
+
+  const goFullscreen = async () => {
+    if (!videoRef.current) return
+    await (videoRef.current as any).presentFullscreenPlayer()
+    setShowControls(true)
+  }
+
+  return (
+    <View style={{ width: '100%', aspectRatio: 9 / 16, maxHeight: 400, backgroundColor: '#000' }}>
+      <AVVideo
+        ref={videoRef}
+        source={{ uri }}
+        style={{ width: '100%', height: '100%' }}
+        resizeMode={ResizeMode.CONTAIN}
+        shouldPlay
+        isLooping
+        isMuted={isMuted}
+      />
+      {/* Tap area to toggle controls */}
+      <Pressable
+        onPress={() => setShowControls(prev => !prev)}
+        style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }}
+      >
+        {showControls && (
+          <>
+            {/* Center play/pause */}
+            <TouchableOpacity
+              onPress={togglePlay}
+              style={{
+                position: 'absolute', top: '50%', left: '50%',
+                marginTop: -24, marginLeft: -24,
+                width: 48, height: 48, borderRadius: 24,
+                backgroundColor: 'rgba(0,0,0,0.5)',
+                alignItems: 'center', justifyContent: 'center',
+              }}
+            >
+              {isPlaying
+                ? <Pause size={22} color="#fff" fill="#fff" />
+                : <Play size={22} color="#fff" fill="#fff" style={{ marginLeft: 2 }} />
+              }
+            </TouchableOpacity>
+
+            {/* Bottom bar — mute + fullscreen */}
+            <View style={{
+              position: 'absolute', bottom: 8, left: 8, right: 8,
+              flexDirection: 'row', justifyContent: 'space-between',
+            }}>
+              <TouchableOpacity
+                onPress={toggleMute}
+                style={{
+                  width: 32, height: 32, borderRadius: 16,
+                  backgroundColor: 'rgba(0,0,0,0.5)',
+                  alignItems: 'center', justifyContent: 'center',
+                }}
+              >
+                {isMuted
+                  ? <VolumeX size={16} color="#fff" />
+                  : <Volume2 size={16} color="#fff" />
+                }
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={goFullscreen}
+                style={{
+                  width: 32, height: 32, borderRadius: 16,
+                  backgroundColor: 'rgba(0,0,0,0.5)',
+                  alignItems: 'center', justifyContent: 'center',
+                }}
+              >
+                <Maximize2 size={16} color="#fff" />
+              </TouchableOpacity>
+            </View>
+          </>
+        )}
+      </Pressable>
+    </View>
+  )
+}
+
+// ============================================
 // Main Screen
 // ============================================
 
@@ -2684,6 +2801,9 @@ export default function MomentsScreen() {
                       style={{ width: '100%', aspectRatio: 1 }}
                       resizeMode="contain"
                     />
+                  )}
+                  {selectedMoment.type === 'video' && selectedMoment.media_url && (
+                    <VideoPlayer uri={selectedMoment.media_url} />
                   )}
 
                   <View style={{ padding: 20, gap: 16 }}>
