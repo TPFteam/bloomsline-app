@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useRef } from 'react'
+import { useState, useCallback, useEffect, useRef, useMemo } from 'react'
 import {
   View,
   Text,
@@ -26,18 +26,17 @@ import {
   Mic,
   PenLine,
   Sparkles,
-  Grid3X3,
-  List,
-  Heart,
   X,
   Trash2,
   Play,
-  SlidersHorizontal,
-  Check,
   Sun,
   Moon,
   Send,
-  ChevronLeft,
+  Calendar,
+  LayoutGrid,
+  ChevronLeft as ChevronLeftIcon,
+  ChevronRight as ChevronRightIcon,
+  Shuffle,
 } from 'lucide-react-native'
 import { useAuth } from '@/lib/auth-context'
 import { getMemberMoments, deleteMoment, type Moment } from '@/lib/services/moments'
@@ -45,17 +44,58 @@ import { useBloomChat, type BloomMessage } from '@/lib/hooks/useBloomChat'
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window')
 
-const MOOD_OPTIONS = [
-  'grateful', 'peaceful', 'joyful', 'inspired', 'loved',
-  'calm', 'hopeful', 'proud', 'overwhelmed', 'tired', 'uncertain',
-]
+// ============================================
+// Constants
+// ============================================
 
 const POSITIVE_MOODS = ['grateful', 'peaceful', 'joyful', 'inspired', 'loved', 'calm', 'hopeful', 'proud']
 
-type DateFilter = 'today' | 'week' | 'month' | 'all'
+const MOOD_COLORS: Record<string, string> = {
+  grateful: '#f59e0b',
+  peaceful: '#14b8a6',
+  joyful: '#eab308',
+  inspired: '#8b5cf6',
+  loved: '#ec4899',
+  calm: '#06b6d4',
+  hopeful: '#22c55e',
+  proud: '#ef4444',
+  overwhelmed: '#f97316',
+  tired: '#6b7280',
+  uncertain: '#a78bfa',
+}
 
-function TypeIcon({ type, size = 18 }: { type: string; size?: number }) {
-  const color = '#fff'
+const BLOOM_PROMPTS = [
+  'How are you feeling?',
+  'What\'s on your mind?',
+  'Tell me about your day',
+  'Need someone to talk to?',
+  'What made you smile today?',
+  'Share your thoughts...',
+]
+
+const DEFAULT_SUGGESTIONS = [
+  "How am I feeling today",
+  "What have you noticed about me",
+  "Help me with my habits",
+  "How are my anchors going",
+]
+
+const TAGLINES = [
+  "Listening to you",
+  "Here for you",
+  "Always by your side",
+  "You matter",
+  "Take your time",
+  "I'm here",
+]
+
+const DAY_LABELS = ['S', 'M', 'T', 'W', 'T', 'F', 'S']
+
+// ============================================
+// Utility functions
+// ============================================
+
+function TypeIcon({ type, size = 18, color = '#fff' }: { type: string; size?: number; color?: string }) {
   switch (type) {
     case 'photo': return <Camera size={size} color={color} />
     case 'video': return <Video size={size} color={color} />
@@ -90,14 +130,48 @@ function getTimeAgo(dateStr: string): string {
   return d.toLocaleDateString([], { month: 'short', day: 'numeric' })
 }
 
-const BLOOM_PROMPTS = [
-  'How are you feeling?',
-  'What\'s on your mind?',
-  'Tell me about your day',
-  'Need someone to talk to?',
-  'What made you smile today?',
-  'Share your thoughts...',
-]
+function getDominantMood(moments: Moment[]): string | null {
+  const counts: Record<string, number> = {}
+  moments.forEach(m => {
+    m.moods?.forEach(mood => { counts[mood] = (counts[mood] || 0) + 1 })
+  })
+  const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1])
+  return sorted[0]?.[0] || null
+}
+
+function getDateKey(date: Date): string {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+}
+
+function getWeekLabel(date: Date, now: Date): string {
+  const startOfThisWeek = new Date(now)
+  startOfThisWeek.setDate(now.getDate() - now.getDay())
+  startOfThisWeek.setHours(0, 0, 0, 0)
+
+  const startOfLastWeek = new Date(startOfThisWeek)
+  startOfLastWeek.setDate(startOfLastWeek.getDate() - 7)
+
+  if (date >= startOfThisWeek) return 'This Week'
+  if (date >= startOfLastWeek) return 'Last Week'
+
+  // Find the Monday of that week
+  const weekStart = new Date(date)
+  weekStart.setDate(date.getDate() - date.getDay())
+  const weekEnd = new Date(weekStart)
+  weekEnd.setDate(weekEnd.getDate() + 6)
+
+  return `${weekStart.toLocaleDateString([], { month: 'short', day: 'numeric' })} – ${weekEnd.toLocaleDateString([], { month: 'short', day: 'numeric' })}`
+}
+
+// Stable waveform heights seeded by index
+function getWaveformHeight(index: number): number {
+  const heights = [12, 20, 16, 24, 10, 22, 14, 26, 18, 8]
+  return heights[index % heights.length]
+}
+
+// ============================================
+// BloomPill
+// ============================================
 
 function BloomPill({ isDark, onPress }: { isDark: boolean; onPress?: () => void }) {
   const [promptIndex, setPromptIndex] = useState(0)
@@ -105,7 +179,6 @@ function BloomPill({ isDark, onPress }: { isDark: boolean; onPress?: () => void 
   const pulseAnim = useRef(new RNAnimated.Value(1)).current
 
   useEffect(() => {
-    // Pulse animation for the orb
     RNAnimated.loop(
       RNAnimated.sequence([
         RNAnimated.timing(pulseAnim, { toValue: 1.3, duration: 1200, useNativeDriver: true }),
@@ -116,10 +189,8 @@ function BloomPill({ isDark, onPress }: { isDark: boolean; onPress?: () => void 
 
   useEffect(() => {
     const interval = setInterval(() => {
-      // Fade out
       RNAnimated.timing(fadeAnim, { toValue: 0, duration: 400, useNativeDriver: true }).start(() => {
         setPromptIndex(prev => (prev + 1) % BLOOM_PROMPTS.length)
-        // Fade in
         RNAnimated.timing(fadeAnim, { toValue: 1, duration: 400, useNativeDriver: true }).start()
       })
     }, 3500)
@@ -148,7 +219,6 @@ function BloomPill({ isDark, onPress }: { isDark: boolean; onPress?: () => void 
           elevation: 12,
         }}
       >
-        {/* Animated orb */}
         <View style={{ width: 28, height: 28, alignItems: 'center', justifyContent: 'center' }}>
           <RNAnimated.View style={{
             position: 'absolute', width: 20, height: 20, borderRadius: 10,
@@ -164,8 +234,6 @@ function BloomPill({ isDark, onPress }: { isDark: boolean; onPress?: () => void 
             shadowRadius: 6,
           }} />
         </View>
-
-        {/* Rotating prompt */}
         <RNAnimated.Text style={{
           fontSize: 14, fontWeight: '500',
           color: isDark ? 'rgba(255,255,255,0.75)' : '#374151',
@@ -182,22 +250,6 @@ function BloomPill({ isDark, onPress }: { isDark: boolean; onPress?: () => void 
 // ============================================
 // Bloom Chat Modal
 // ============================================
-
-const DEFAULT_SUGGESTIONS = [
-  "How am I feeling today",
-  "What have you noticed about me",
-  "Help me with my habits",
-  "How are my anchors going",
-]
-
-const TAGLINES = [
-  "Listening to you",
-  "Here for you",
-  "Always by your side",
-  "You matter",
-  "Take your time",
-  "I'm here",
-]
 
 function TypingDots({ isDark }: { isDark: boolean }) {
   const anims = useRef([
@@ -303,7 +355,6 @@ function BloomChatModal({ isOpen, onClose, isDark }: { isOpen: boolean; onClose:
   const displaySuggestions = suggestions.length > 0 ? suggestions : DEFAULT_SUGGESTIONS
   const showSuggestions = !isLoading && messages.length > 0
 
-  // Rotate taglines
   useEffect(() => {
     if (!isOpen) return
     const interval = setInterval(() => {
@@ -315,7 +366,6 @@ function BloomChatModal({ isOpen, onClose, isDark }: { isOpen: boolean; onClose:
     return () => clearInterval(interval)
   }, [isOpen])
 
-  // Auto-scroll on new messages
   useEffect(() => {
     setTimeout(() => scrollViewRef.current?.scrollToEnd({ animated: true }), 100)
   }, [messages, isLoading])
@@ -349,10 +399,7 @@ function BloomChatModal({ isOpen, onClose, isDark }: { isOpen: boolean; onClose:
           style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.4)' }}
           onPress={onClose}
         >
-          {/* Spacer pushes chat to bottom */}
           <View style={{ flex: 1 }} />
-
-          {/* Chat container */}
           <Pressable
             onPress={() => {}}
             style={{
@@ -384,7 +431,6 @@ function BloomChatModal({ isOpen, onClose, isDark }: { isOpen: boolean; onClose:
               borderBottomColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)',
             }}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-                {/* Pulsing dot */}
                 <View style={{ width: 10, height: 10, alignItems: 'center', justifyContent: 'center' }}>
                   <View style={{
                     width: 10, height: 10, borderRadius: 5,
@@ -420,7 +466,7 @@ function BloomChatModal({ isOpen, onClose, isDark }: { isOpen: boolean; onClose:
               </TouchableOpacity>
             </View>
 
-            {/* Messages — takes all available space */}
+            {/* Messages */}
             <ScrollView
               ref={scrollViewRef}
               style={{ flex: 1 }}
@@ -532,19 +578,819 @@ function BloomChatModal({ isOpen, onClose, isDark }: { isOpen: boolean; onClose:
   )
 }
 
+// ============================================
+// Mood Landscape Hero
+// ============================================
+
+function MoodLandscapeHero({
+  moments,
+  theme,
+}: {
+  moments: Moment[]
+  theme: Record<string, string>
+}) {
+  const now = new Date()
+  const weekAgo = new Date(now)
+  weekAgo.setDate(weekAgo.getDate() - 7)
+  const recentMoments = moments.filter(m => new Date(m.created_at) >= weekAgo)
+
+  // Build 7-day data (Mon through today)
+  const weekDays = useMemo(() => {
+    const days: { date: Date; moments: Moment[]; dominantMood: string | null }[] = []
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date(now)
+      d.setDate(d.getDate() - i)
+      d.setHours(0, 0, 0, 0)
+      const key = getDateKey(d)
+      const dayMoments = moments.filter(m => getDateKey(new Date(m.created_at)) === key)
+      days.push({
+        date: d,
+        moments: dayMoments,
+        dominantMood: getDominantMood(dayMoments),
+      })
+    }
+    return days
+  }, [moments])
+
+  // Mood counts for insight
+  const moodCounts: Record<string, number> = {}
+  recentMoments.forEach(m => {
+    m.moods?.forEach(mood => { moodCounts[mood] = (moodCounts[mood] || 0) + 1 })
+  })
+  const sortedMoods = Object.entries(moodCounts).sort((a, b) => b[1] - a[1])
+  const totalMoodCount = Object.values(moodCounts).reduce((a, b) => a + b, 0)
+  const positiveCount = Object.entries(moodCounts)
+    .filter(([mood]) => POSITIVE_MOODS.includes(mood))
+    .reduce((sum, [, count]) => sum + count, 0)
+  const positiveRatio = totalMoodCount > 0 ? positiveCount / totalMoodCount : 0
+
+  const insight = useMemo(() => {
+    if (recentMoments.length === 0) return 'No moments captured this week yet. Take a moment to capture what matters.'
+    if (positiveRatio >= 0.7) return `You're in a beautiful flow. ${sortedMoods[0] ? `Feeling ${sortedMoods[0][0]} a lot lately.` : ''} Keep going.`
+    if (positiveRatio >= 0.4) return 'A mix of ups and downs — every moment matters in your journey.'
+    return 'This week feels heavy. Remember to be gentle with yourself.'
+  }, [recentMoments.length, positiveRatio, sortedMoods])
+
+  const topMood = sortedMoods[0]?.[0]
+
+  // Gradient colors from first to last dominant mood
+  const gradientColors = useMemo(() => {
+    const firstMood = weekDays.find(d => d.dominantMood)?.dominantMood
+    const lastMood = [...weekDays].reverse().find(d => d.dominantMood)?.dominantMood
+    return [
+      MOOD_COLORS[firstMood || 'calm'] || '#06b6d4',
+      MOOD_COLORS[lastMood || 'peaceful'] || '#14b8a6',
+    ] as [string, string]
+  }, [weekDays])
+
+  return (
+    <View style={{
+      marginHorizontal: 20, marginTop: 12,
+      borderRadius: 24, padding: 20,
+      backgroundColor: theme.cardBg,
+      borderWidth: 1, borderColor: theme.cardBorder,
+    }}>
+      {/* 7-day dots */}
+      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+        {weekDays.map((day, i) => {
+          const color = day.dominantMood ? (MOOD_COLORS[day.dominantMood] || '#6b7280') : theme.textFaint
+          const size = day.moments.length === 0 ? 8 : Math.min(8 + day.moments.length * 3, 20)
+          const dayLabel = ['M', 'T', 'W', 'T', 'F', 'S', 'S']
+          const d = day.date.getDay()
+          const label = dayLabel[d === 0 ? 6 : d - 1]
+
+          return (
+            <View key={i} style={{ alignItems: 'center', gap: 6 }}>
+              <Text style={{ fontSize: 10, color: theme.textFaint, fontWeight: '500' }}>{label}</Text>
+              <View style={{
+                width: size, height: size, borderRadius: size / 2,
+                backgroundColor: color,
+                opacity: day.moments.length === 0 ? 0.3 : 1,
+              }} />
+            </View>
+          )
+        })}
+      </View>
+
+      {/* Gradient bar */}
+      <LinearGradient
+        colors={gradientColors}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 0 }}
+        style={{
+          height: 4, borderRadius: 2, marginBottom: 14, opacity: 0.6,
+        }}
+      />
+
+      {/* AI insight */}
+      <Text style={{ fontSize: 14, color: theme.textMuted, lineHeight: 20, marginBottom: 12 }}>
+        {insight}
+      </Text>
+
+      {/* Stat pills */}
+      <View style={{ flexDirection: 'row', gap: 8 }}>
+        <View style={{
+          paddingHorizontal: 10, paddingVertical: 5, borderRadius: 999,
+          backgroundColor: theme.toggleBg,
+        }}>
+          <Text style={{ fontSize: 12, color: theme.textMuted, fontWeight: '500' }}>
+            {recentMoments.length} this week
+          </Text>
+        </View>
+        {topMood && (
+          <View style={{
+            flexDirection: 'row', alignItems: 'center', gap: 5,
+            paddingHorizontal: 10, paddingVertical: 5, borderRadius: 999,
+            backgroundColor: theme.toggleBg,
+          }}>
+            <View style={{
+              width: 6, height: 6, borderRadius: 3,
+              backgroundColor: MOOD_COLORS[topMood] || '#6b7280',
+            }} />
+            <Text style={{ fontSize: 12, color: theme.textMuted, fontWeight: '500', textTransform: 'capitalize' }}>
+              {topMood}
+            </Text>
+          </View>
+        )}
+      </View>
+    </View>
+  )
+}
+
+// ============================================
+// Revisit Card
+// ============================================
+
+function RevisitCard({
+  moments,
+  theme,
+  onOpenMoment,
+}: {
+  moments: Moment[]
+  theme: Record<string, string>
+  onOpenMoment: (m: Moment) => void
+}) {
+  const [revisitMoment, setRevisitMoment] = useState<Moment | null>(null)
+
+  const pool = useMemo(() => {
+    const cutoff = new Date()
+    cutoff.setHours(cutoff.getHours() - 24)
+    return moments.filter(m => {
+      const hasPositiveMood = m.moods?.some(mood => POSITIVE_MOODS.includes(mood))
+      const isOldEnough = new Date(m.created_at) < cutoff
+      return hasPositiveMood && isOldEnough
+    })
+  }, [moments])
+
+  useEffect(() => {
+    if (pool.length > 0 && !revisitMoment) {
+      setRevisitMoment(pool[Math.floor(Math.random() * pool.length)])
+    }
+  }, [pool])
+
+  const pickAnother = useCallback(() => {
+    if (pool.length <= 1) return
+    let next: Moment
+    do {
+      next = pool[Math.floor(Math.random() * pool.length)]
+    } while (next.id === revisitMoment?.id && pool.length > 1)
+    setRevisitMoment(next)
+  }, [pool, revisitMoment])
+
+  if (!revisitMoment) return null
+
+  const isPhoto = revisitMoment.type === 'photo' && revisitMoment.media_url
+
+  return (
+    <View style={{
+      marginHorizontal: 20, marginTop: 12,
+      borderRadius: 24, padding: 16,
+      backgroundColor: theme.cardBg,
+      borderWidth: 1, borderColor: theme.cardBorder,
+    }}>
+      <Text style={{ fontSize: 12, color: theme.textFaint, fontWeight: '500', letterSpacing: 0.5, marginBottom: 10 }}>
+        REMEMBER THIS?
+      </Text>
+
+      <TouchableOpacity
+        activeOpacity={0.8}
+        onPress={() => onOpenMoment(revisitMoment)}
+        style={{ flexDirection: 'row', gap: 12 }}
+      >
+        {/* Thumbnail */}
+        {isPhoto ? (
+          <Image
+            source={{ uri: revisitMoment.media_url! }}
+            style={{ width: 56, height: 56, borderRadius: 14 }}
+            resizeMode="cover"
+          />
+        ) : (
+          <LinearGradient
+            colors={typeGradient(revisitMoment.type)}
+            style={{
+              width: 56, height: 56, borderRadius: 14,
+              alignItems: 'center', justifyContent: 'center',
+            }}
+          >
+            <TypeIcon type={revisitMoment.type} size={22} />
+          </LinearGradient>
+        )}
+
+        {/* Text */}
+        <View style={{ flex: 1 }}>
+          <Text style={{ fontSize: 14, color: theme.text, lineHeight: 19 }} numberOfLines={2}>
+            {revisitMoment.text_content || revisitMoment.caption || `${revisitMoment.type.charAt(0).toUpperCase() + revisitMoment.type.slice(1)} moment`}
+          </Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 6 }}>
+            {revisitMoment.moods?.slice(0, 2).map(mood => (
+              <View key={mood} style={{
+                flexDirection: 'row', alignItems: 'center', gap: 3,
+                paddingHorizontal: 7, paddingVertical: 2, borderRadius: 999,
+                backgroundColor: `${MOOD_COLORS[mood] || '#6b7280'}20`,
+              }}>
+                <View style={{
+                  width: 5, height: 5, borderRadius: 2.5,
+                  backgroundColor: MOOD_COLORS[mood] || '#6b7280',
+                }} />
+                <Text style={{ fontSize: 10, color: theme.textMuted, textTransform: 'capitalize' }}>
+                  {mood}
+                </Text>
+              </View>
+            ))}
+            <Text style={{ fontSize: 11, color: theme.textFaint }}>
+              {getTimeAgo(revisitMoment.created_at)}
+            </Text>
+          </View>
+        </View>
+      </TouchableOpacity>
+
+      {/* Another button */}
+      {pool.length > 1 && (
+        <TouchableOpacity
+          onPress={pickAnother}
+          activeOpacity={0.7}
+          style={{
+            flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
+            marginTop: 12, paddingVertical: 8, borderRadius: 12,
+            backgroundColor: theme.toggleBg,
+          }}
+        >
+          <Shuffle size={13} color={theme.textMuted} />
+          <Text style={{ fontSize: 13, color: theme.textMuted, fontWeight: '500' }}>Another</Text>
+        </TouchableOpacity>
+      )}
+    </View>
+  )
+}
+
+// ============================================
+// Calendar View — Month in Pixels
+// ============================================
+
+function CalendarView({
+  moments,
+  theme,
+  isDark,
+  onOpenMoment,
+}: {
+  moments: Moment[]
+  theme: Record<string, string>
+  isDark: boolean
+  onOpenMoment: (m: Moment) => void
+}) {
+  const [currentMonth, setCurrentMonth] = useState(() => {
+    const now = new Date()
+    return new Date(now.getFullYear(), now.getMonth(), 1)
+  })
+  const [selectedDate, setSelectedDate] = useState<string | null>(null)
+
+  // Group moments by date
+  const momentsByDate = useMemo(() => {
+    const map: Record<string, Moment[]> = {}
+    moments.forEach(m => {
+      const key = getDateKey(new Date(m.created_at))
+      if (!map[key]) map[key] = []
+      map[key].push(m)
+    })
+    return map
+  }, [moments])
+
+  // Build calendar grid
+  const calendarGrid = useMemo(() => {
+    const year = currentMonth.getFullYear()
+    const month = currentMonth.getMonth()
+    const firstDay = new Date(year, month, 1).getDay()
+    const daysInMonth = new Date(year, month + 1, 0).getDate()
+    const today = getDateKey(new Date())
+
+    const cells: { date: Date | null; key: string; moments: Moment[]; dominantMood: string | null; isToday: boolean; isFuture: boolean }[] = []
+
+    // Leading empty cells
+    for (let i = 0; i < firstDay; i++) {
+      cells.push({ date: null, key: `empty-${i}`, moments: [], dominantMood: null, isToday: false, isFuture: false })
+    }
+
+    // Day cells
+    for (let d = 1; d <= daysInMonth; d++) {
+      const date = new Date(year, month, d)
+      const key = getDateKey(date)
+      const dayMoments = momentsByDate[key] || []
+      cells.push({
+        date,
+        key,
+        moments: dayMoments,
+        dominantMood: getDominantMood(dayMoments),
+        isToday: key === today,
+        isFuture: date > new Date(),
+      })
+    }
+
+    // Chunk into weeks
+    const weeks: typeof cells[] = []
+    for (let i = 0; i < cells.length; i += 7) {
+      weeks.push(cells.slice(i, i + 7))
+    }
+
+    return weeks
+  }, [currentMonth, momentsByDate])
+
+  const selectedMoments = selectedDate ? (momentsByDate[selectedDate] || []) : []
+
+  const monthLabel = currentMonth.toLocaleDateString([], { month: 'long', year: 'numeric' })
+
+  // Month stats
+  const monthMoments = useMemo(() => {
+    const year = currentMonth.getFullYear()
+    const month = currentMonth.getMonth()
+    return moments.filter(m => {
+      const d = new Date(m.created_at)
+      return d.getFullYear() === year && d.getMonth() === month
+    })
+  }, [moments, currentMonth])
+
+  const activeDays = useMemo(() => {
+    const days = new Set<string>()
+    monthMoments.forEach(m => days.add(getDateKey(new Date(m.created_at))))
+    return days.size
+  }, [monthMoments])
+
+  const monthTopMood = getDominantMood(monthMoments)
+
+  const cellSize = (SCREEN_WIDTH - 40 - 24) / 7 // 20px padding each side, 4px gap * 6
+
+  return (
+    <View style={{ paddingHorizontal: 20, marginTop: 16 }}>
+      {/* Month nav */}
+      <View style={{
+        flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+        marginBottom: 16,
+      }}>
+        <TouchableOpacity
+          onPress={() => setCurrentMonth(new Date(currentMonth.getFullYear(), currentMonth.getMonth() - 1, 1))}
+          style={{
+            width: 34, height: 34, borderRadius: 12,
+            alignItems: 'center', justifyContent: 'center',
+            backgroundColor: theme.toggleBg,
+          }}
+        >
+          <ChevronLeftIcon size={18} color={theme.textMuted} />
+        </TouchableOpacity>
+        <Text style={{ fontSize: 16, fontWeight: '600', color: theme.text }}>
+          {monthLabel}
+        </Text>
+        <TouchableOpacity
+          onPress={() => setCurrentMonth(new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 1))}
+          style={{
+            width: 34, height: 34, borderRadius: 12,
+            alignItems: 'center', justifyContent: 'center',
+            backgroundColor: theme.toggleBg,
+          }}
+        >
+          <ChevronRightIcon size={18} color={theme.textMuted} />
+        </TouchableOpacity>
+      </View>
+
+      {/* Day-of-week labels */}
+      <View style={{ flexDirection: 'row', marginBottom: 8 }}>
+        {DAY_LABELS.map((label, i) => (
+          <View key={i} style={{ width: cellSize, alignItems: 'center', marginRight: i < 6 ? 4 : 0 }}>
+            <Text style={{ fontSize: 11, color: theme.textFaint, fontWeight: '500' }}>{label}</Text>
+          </View>
+        ))}
+      </View>
+
+      {/* Grid */}
+      {calendarGrid.map((week, wi) => (
+        <View key={wi} style={{ flexDirection: 'row', marginBottom: 4 }}>
+          {week.map((cell, ci) => {
+            if (!cell.date) {
+              return <View key={cell.key} style={{ width: cellSize, height: cellSize, marginRight: ci < 6 ? 4 : 0 }} />
+            }
+
+            if (cell.isFuture) {
+              return (
+                <View key={cell.key} style={{
+                  width: cellSize, height: cellSize, marginRight: ci < 6 ? 4 : 0,
+                  borderRadius: 8, backgroundColor: 'transparent',
+                }} />
+              )
+            }
+
+            const moodColor = cell.dominantMood ? (MOOD_COLORS[cell.dominantMood] || '#6b7280') : (isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)')
+            const isSelected = selectedDate === cell.key
+
+            return (
+              <TouchableOpacity
+                key={cell.key}
+                activeOpacity={0.7}
+                onPress={() => setSelectedDate(isSelected ? null : cell.key)}
+                style={{
+                  width: cellSize, height: cellSize, marginRight: ci < 6 ? 4 : 0,
+                  borderRadius: 8,
+                  backgroundColor: moodColor,
+                  opacity: cell.moments.length === 0 ? 0.5 : 1,
+                  borderWidth: cell.isToday ? 2 : isSelected ? 2 : 0,
+                  borderColor: cell.isToday ? theme.text : (isSelected ? '#10b981' : 'transparent'),
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+              >
+                {cell.moments.length > 0 && (
+                  <Text style={{
+                    fontSize: 10, fontWeight: '600',
+                    color: '#ffffff',
+                    textShadowColor: 'rgba(0,0,0,0.3)',
+                    textShadowOffset: { width: 0, height: 1 },
+                    textShadowRadius: 2,
+                  }}>
+                    {cell.date.getDate()}
+                  </Text>
+                )}
+              </TouchableOpacity>
+            )
+          })}
+          {/* Pad incomplete weeks */}
+          {week.length < 7 && Array.from({ length: 7 - week.length }).map((_, i) => (
+            <View key={`pad-${wi}-${i}`} style={{ width: cellSize, height: cellSize, marginRight: i < (6 - week.length) ? 4 : 0 }} />
+          ))}
+        </View>
+      ))}
+
+      {/* Selected day strip */}
+      {selectedDate && (
+        <View style={{ marginTop: 12 }}>
+          {selectedMoments.length === 0 ? (
+            <Text style={{ fontSize: 13, color: theme.textFaint, textAlign: 'center', paddingVertical: 12 }}>
+              No moments this day
+            </Text>
+          ) : (
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={{ gap: 10, paddingVertical: 4 }}
+            >
+              {selectedMoments.map(m => {
+                const isPhoto = m.type === 'photo' && m.media_url
+
+                return (
+                  <TouchableOpacity
+                    key={m.id}
+                    activeOpacity={0.8}
+                    onPress={() => onOpenMoment(m)}
+                    style={{
+                      width: 130, borderRadius: 16, overflow: 'hidden',
+                      backgroundColor: theme.cardBg,
+                      borderWidth: 1, borderColor: theme.cardBorder,
+                    }}
+                  >
+                    {isPhoto ? (
+                      <Image
+                        source={{ uri: m.media_url! }}
+                        style={{ width: 130, height: 90 }}
+                        resizeMode="cover"
+                      />
+                    ) : m.type === 'voice' ? (
+                      <LinearGradient
+                        colors={[theme.voiceGrad1, theme.voiceGrad2]}
+                        style={{ width: 130, height: 90, alignItems: 'center', justifyContent: 'center' }}
+                      >
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 2 }}>
+                          {Array.from({ length: 8 }).map((_, i) => (
+                            <View key={i} style={{
+                              width: 3, borderRadius: 2,
+                              height: getWaveformHeight(i),
+                              backgroundColor: theme.voiceBar,
+                            }} />
+                          ))}
+                        </View>
+                      </LinearGradient>
+                    ) : m.type === 'video' ? (
+                      <View style={{
+                        width: 130, height: 90,
+                        backgroundColor: theme.videoBg,
+                        alignItems: 'center', justifyContent: 'center',
+                      }}>
+                        <View style={{
+                          width: 32, height: 32, borderRadius: 16,
+                          backgroundColor: theme.videoPlayBg,
+                          alignItems: 'center', justifyContent: 'center',
+                        }}>
+                          <Play size={14} color="#ffffff" style={{ marginLeft: 2 }} />
+                        </View>
+                      </View>
+                    ) : (
+                      <View style={{
+                        width: 130, height: 90, padding: 10,
+                        backgroundColor: isDark ? 'rgba(255,255,255,0.04)' : '#fefce8',
+                      }}>
+                        <Text style={{ fontSize: 11, color: theme.textMuted, lineHeight: 16 }} numberOfLines={4}>
+                          {m.text_content || m.caption || 'Written moment'}
+                        </Text>
+                      </View>
+                    )}
+                    <View style={{ padding: 8 }}>
+                      <Text style={{ fontSize: 11, color: theme.textFaint }}>
+                        {new Date(m.created_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
+                      </Text>
+                    </View>
+                  </TouchableOpacity>
+                )
+              })}
+            </ScrollView>
+          )}
+        </View>
+      )}
+
+      {/* Month stats */}
+      <View style={{
+        flexDirection: 'row', justifyContent: 'center', gap: 12,
+        marginTop: 16, paddingTop: 14,
+        borderTopWidth: 1, borderTopColor: theme.cardBorder,
+      }}>
+        <Text style={{ fontSize: 12, color: theme.textFaint }}>
+          {monthMoments.length} moments
+        </Text>
+        <Text style={{ fontSize: 12, color: theme.textFaint }}>·</Text>
+        <Text style={{ fontSize: 12, color: theme.textFaint }}>
+          {activeDays} days active
+        </Text>
+        {monthTopMood && (
+          <>
+            <Text style={{ fontSize: 12, color: theme.textFaint }}>·</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+              <View style={{
+                width: 6, height: 6, borderRadius: 3,
+                backgroundColor: MOOD_COLORS[monthTopMood] || '#6b7280',
+              }} />
+              <Text style={{ fontSize: 12, color: theme.textFaint, textTransform: 'capitalize' }}>
+                {monthTopMood}
+              </Text>
+            </View>
+          </>
+        )}
+      </View>
+    </View>
+  )
+}
+
+// ============================================
+// Gallery View — Weekly Chapters
+// ============================================
+
+function GalleryView({
+  moments,
+  theme,
+  isDark,
+  onOpenMoment,
+}: {
+  moments: Moment[]
+  theme: Record<string, string>
+  isDark: boolean
+  onOpenMoment: (m: Moment) => void
+}) {
+  const now = new Date()
+
+  const weeklyGroups = useMemo(() => {
+    if (moments.length === 0) return []
+
+    const groups: { label: string; moments: Moment[]; dominantMood: string | null }[] = []
+    const groupMap = new Map<string, Moment[]>()
+
+    // Group moments by week label
+    moments.forEach(m => {
+      const label = getWeekLabel(new Date(m.created_at), now)
+      if (!groupMap.has(label)) groupMap.set(label, [])
+      groupMap.get(label)!.push(m)
+    })
+
+    groupMap.forEach((weekMoments, label) => {
+      groups.push({
+        label,
+        moments: weekMoments,
+        dominantMood: getDominantMood(weekMoments),
+      })
+    })
+
+    return groups
+  }, [moments])
+
+  const colWidth = (SCREEN_WIDTH - 40 - 10) / 2 // 20px padding each side, 10px gap
+
+  return (
+    <View style={{ paddingHorizontal: 20, marginTop: 16 }}>
+      {weeklyGroups.map((group, gi) => (
+        <View key={gi} style={{ marginBottom: 24 }}>
+          {/* Week header */}
+          <View style={{
+            flexDirection: 'row', alignItems: 'center', gap: 8,
+            marginBottom: 12,
+          }}>
+            <Text style={{ fontSize: 15, fontWeight: '600', color: theme.text }}>
+              {group.label}
+            </Text>
+            {group.dominantMood && (
+              <View style={{
+                width: 8, height: 8, borderRadius: 4,
+                backgroundColor: MOOD_COLORS[group.dominantMood] || '#6b7280',
+              }} />
+            )}
+            <Text style={{ fontSize: 12, color: theme.textFaint }}>
+              {group.moments.length} moment{group.moments.length !== 1 ? 's' : ''}
+            </Text>
+          </View>
+
+          {/* Masonry 2-column layout */}
+          <View style={{ flexDirection: 'row', gap: 10 }}>
+            {/* Left column */}
+            <View style={{ width: colWidth, gap: 10 }}>
+              {group.moments.filter((_, i) => i % 2 === 0).map((m, mi) => (
+                <MasonryCard
+                  key={m.id}
+                  moment={m}
+                  theme={theme}
+                  isDark={isDark}
+                  width={colWidth}
+                  isLeft
+                  index={mi}
+                  onPress={() => onOpenMoment(m)}
+                />
+              ))}
+            </View>
+            {/* Right column */}
+            <View style={{ width: colWidth, gap: 10 }}>
+              {group.moments.filter((_, i) => i % 2 === 1).map((m, mi) => (
+                <MasonryCard
+                  key={m.id}
+                  moment={m}
+                  theme={theme}
+                  isDark={isDark}
+                  width={colWidth}
+                  isLeft={false}
+                  index={mi}
+                  onPress={() => onOpenMoment(m)}
+                />
+              ))}
+            </View>
+          </View>
+        </View>
+      ))}
+    </View>
+  )
+}
+
+function MasonryCard({
+  moment: m,
+  theme,
+  isDark,
+  width,
+  isLeft,
+  index,
+  onPress,
+}: {
+  moment: Moment
+  theme: Record<string, string>
+  isDark: boolean
+  width: number
+  isLeft: boolean
+  index: number
+  onPress: () => void
+}) {
+  const isPhoto = m.type === 'photo' && m.media_url
+  const isVideo = m.type === 'video'
+  const isVoice = m.type === 'voice'
+
+  // Alternating aspect ratios for visual variety
+  const photoAspect = (isLeft ? (index % 2 === 0) : (index % 2 === 1)) ? 3 / 4 : 1
+
+  const dominantMood = m.moods?.[0]
+  const moodColor = dominantMood ? (MOOD_COLORS[dominantMood] || '#6b7280') : theme.textFaint
+
+  return (
+    <TouchableOpacity
+      activeOpacity={0.8}
+      onPress={onPress}
+      style={{
+        borderRadius: 16, overflow: 'hidden',
+        backgroundColor: theme.cardBg,
+        borderWidth: 1, borderColor: theme.cardBorder,
+      }}
+    >
+      {isPhoto ? (
+        <Image
+          source={{ uri: m.media_url! }}
+          style={{ width, aspectRatio: photoAspect }}
+          resizeMode="cover"
+        />
+      ) : isVideo ? (
+        <View style={{
+          width, aspectRatio: 3 / 4,
+          backgroundColor: theme.videoBg,
+          alignItems: 'center', justifyContent: 'center',
+        }}>
+          <View style={{
+            width: 40, height: 40, borderRadius: 20,
+            backgroundColor: theme.videoPlayBg,
+            alignItems: 'center', justifyContent: 'center',
+          }}>
+            <Play size={18} color="#ffffff" style={{ marginLeft: 2 }} />
+          </View>
+        </View>
+      ) : isVoice ? (
+        <LinearGradient
+          colors={[theme.voiceGrad1, theme.voiceGrad2]}
+          style={{
+            width, height: 100,
+            alignItems: 'center', justifyContent: 'center',
+          }}
+        >
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3 }}>
+            {Array.from({ length: 12 }).map((_, i) => (
+              <View key={i} style={{
+                width: 3, borderRadius: 2,
+                height: getWaveformHeight(i),
+                backgroundColor: theme.voiceBar,
+              }} />
+            ))}
+          </View>
+          {m.duration_seconds && (
+            <Text style={{ fontSize: 11, color: theme.textMuted, marginTop: 8 }}>
+              {Math.floor(m.duration_seconds / 60)}:{String(m.duration_seconds % 60).padStart(2, '0')}
+            </Text>
+          )}
+        </LinearGradient>
+      ) : (
+        // Write moment
+        <LinearGradient
+          colors={[theme.writeGrad1, theme.writeGrad2]}
+          style={{
+            width, minHeight: 100, padding: 14,
+            justifyContent: 'center',
+          }}
+        >
+          <Text style={{ fontSize: 13, color: isDark ? 'rgba(255,255,255,0.7)' : '#92400e', lineHeight: 18 }} numberOfLines={5}>
+            {m.text_content || m.caption || 'Written moment'}
+          </Text>
+        </LinearGradient>
+      )}
+
+      {/* Mood color strip + time */}
+      <View style={{
+        flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+        paddingHorizontal: 10, paddingVertical: 8,
+      }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+          <View style={{
+            width: 16, height: 3, borderRadius: 1.5,
+            backgroundColor: moodColor,
+          }} />
+          {m.moods?.[0] && (
+            <Text style={{ fontSize: 10, color: theme.textFaint, textTransform: 'capitalize' }}>
+              {m.moods[0]}
+            </Text>
+          )}
+        </View>
+        <Text style={{ fontSize: 10, color: theme.textFaint }}>
+          {getTimeAgo(m.created_at)}
+        </Text>
+      </View>
+    </TouchableOpacity>
+  )
+}
+
+// ============================================
+// Main Screen
+// ============================================
+
 export default function MomentsScreen() {
   const { user } = useAuth()
   const router = useRouter()
   const [moments, setMoments] = useState<Moment[]>([])
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
-  const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid')
+  const [viewMode, setViewMode] = useState<'calendar' | 'gallery'>('gallery')
   const [isDark, setIsDark] = useState(true)
   const [selectedMoment, setSelectedMoment] = useState<Moment | null>(null)
   const [, setDeleting] = useState(false)
-  const [showFilters, setShowFilters] = useState(false)
-  const [dateFilter, setDateFilter] = useState<DateFilter>('today')
-  const [selectedMoods, setSelectedMoods] = useState<string[]>([])
   const [isBloomOpen, setIsBloomOpen] = useState(false)
 
   const fetchMoments = useCallback(async () => {
@@ -581,92 +1427,31 @@ export default function MomentsScreen() {
     ])
   }
 
-  const toggleMood = (mood: string) => {
-    setSelectedMoods(prev =>
-      prev.includes(mood) ? prev.filter(m => m !== mood) : [...prev, mood]
-    )
-  }
-
-  // Filter moments
-  const filteredMoments = moments.filter(m => {
-    if (selectedMoods.length > 0) {
-      const hasMood = selectedMoods.some(mood => m.moods?.includes(mood))
-      if (!hasMood) return false
-    }
-    if (dateFilter !== 'all') {
-      const mDate = new Date(m.created_at)
-      const now = new Date()
-      if (dateFilter === 'today') {
-        const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
-        if (mDate < today) return false
-      } else if (dateFilter === 'week') {
-        const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000)
-        if (mDate < weekAgo) return false
-      } else if (dateFilter === 'month') {
-        const monthAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000)
-        if (mDate < monthAgo) return false
-      }
-    }
-    return true
-  })
-
-  const hasActiveFilters = selectedMoods.length > 0 || dateFilter !== 'today'
-
-  // Mood insights from last 7 days
-  const weekAgo = new Date()
-  weekAgo.setDate(weekAgo.getDate() - 7)
-  const recentMoments = moments.filter(m => new Date(m.created_at) >= weekAgo)
-  const moodCounts: Record<string, number> = {}
-  recentMoments.forEach(m => {
-    m.moods?.forEach(mood => { moodCounts[mood] = (moodCounts[mood] || 0) + 1 })
-  })
-  const sortedMoods = Object.entries(moodCounts).sort((a, b) => b[1] - a[1])
-  const totalMoodCount = Object.values(moodCounts).reduce((a, b) => a + b, 0)
-  const positiveCount = Object.entries(moodCounts)
-    .filter(([mood]) => POSITIVE_MOODS.includes(mood))
-    .reduce((sum, [, count]) => sum + count, 0)
-  const positiveRatio = totalMoodCount > 0 ? positiveCount / totalMoodCount : 0
-
-  const getInsight = () => {
-    if (recentMoments.length === 0) return 'No moments captured this week yet. Take a moment to capture what matters.'
-    if (positiveRatio >= 0.7) return `You're going through a beautiful time. ${sortedMoods[0] ? `You've been feeling ${sortedMoods[0][0]} a lot.` : ''} Keep it up.`
-    if (positiveRatio >= 0.4) return 'Ups and downs are normal. Every moment matters in your journey.'
-    return 'This week seems tough. Remember to take care of yourself.'
-  }
-
-  // Theme colors — matched to web app (Next.js moments page)
+  // Theme
   const theme = {
     bg: isDark ? '#0c0c0e' : '#f8f7f4',
-    text: isDark ? '#ffffff' : '#111827',         // text-gray-900
-    textMuted: isDark ? 'rgba(255,255,255,0.5)' : '#6b7280',  // text-gray-500
-    textFaint: isDark ? 'rgba(255,255,255,0.3)' : '#9ca3af',  // text-gray-400
-    cardBg: isDark ? 'rgba(255,255,255,0.04)' : '#ffffff',    // bg-white in light
+    text: isDark ? '#ffffff' : '#111827',
+    textMuted: isDark ? 'rgba(255,255,255,0.5)' : '#6b7280',
+    textFaint: isDark ? 'rgba(255,255,255,0.3)' : '#9ca3af',
+    cardBg: isDark ? 'rgba(255,255,255,0.04)' : '#ffffff',
     cardBorder: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)',
     toggleBg: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.05)',
-    accentBg: isDark ? '#ffffff' : '#111827',     // bg-gray-900 in light
+    accentBg: isDark ? '#ffffff' : '#111827',
     accentText: isDark ? '#000000' : '#ffffff',
     divider: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)',
-    moodTagBg: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.05)',  // bg-white/10 vs bg-black/5
+    moodTagBg: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.05)',
     moodTagText: isDark ? 'rgba(255,255,255,0.5)' : '#6b7280',
-    filterActiveBg: isDark ? 'rgba(255,255,255,0.15)' : 'rgba(0,0,0,0.08)',
-    filterActiveBorder: isDark ? 'rgba(255,255,255,0.2)' : 'rgba(0,0,0,0.12)',
-    filterActiveText: isDark ? '#ffffff' : '#111827',
-    // Voice waveform colors
-    voiceGrad1: isDark ? 'rgba(139,92,246,0.2)' : 'rgba(221,214,254,1)',   // violet-100
-    voiceGrad2: isDark ? 'rgba(124,58,237,0.2)' : 'rgba(233,213,255,1)',   // purple-100
+    voiceGrad1: isDark ? 'rgba(139,92,246,0.2)' : 'rgba(221,214,254,1)',
+    voiceGrad2: isDark ? 'rgba(124,58,237,0.2)' : 'rgba(233,213,255,1)',
     voiceBar: isDark ? 'rgba(167,139,250,0.6)' : 'rgba(139,92,246,0.5)',
     voicePlayBg: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(255,255,255,0.6)',
     voicePlayIcon: isDark ? '#ffffff' : '#7c3aed',
-    // Text-only / write fallback
-    writeGrad1: isDark ? 'rgba(245,158,11,0.2)' : 'rgba(254,243,199,1)',   // amber-100
-    writeGrad2: isDark ? 'rgba(234,88,12,0.2)' : 'rgba(255,237,213,1)',    // orange-100
+    writeGrad1: isDark ? 'rgba(245,158,11,0.2)' : 'rgba(254,243,199,1)',
+    writeGrad2: isDark ? 'rgba(234,88,12,0.2)' : 'rgba(255,237,213,1)',
     writeIcon: isDark ? 'rgba(251,191,36,0.5)' : 'rgba(217,119,6,0.5)',
-    // Video placeholder
     videoBg: isDark ? '#1a1a1c' : '#111827',
     videoPlayBg: isDark ? 'rgba(255,255,255,0.15)' : 'rgba(255,255,255,0.2)',
   }
-
-  const gridCardWidth = (SCREEN_WIDTH - 40 - 12) / 2
 
   if (loading) {
     return (
@@ -683,544 +1468,151 @@ export default function MomentsScreen() {
         showsVerticalScrollIndicator={false}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#10b981" />}
       >
-        {/* Header */}
+        {/* ===== Header ===== */}
         <View style={{ paddingHorizontal: 20, paddingTop: 24, paddingBottom: 8 }}>
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+            <View>
+              <Text style={{ fontSize: 26, fontWeight: '700', color: theme.text, letterSpacing: -0.5 }}>
+                Moments
+              </Text>
+              {moments.length > 0 && (
+                <Text style={{ fontSize: 13, color: theme.textFaint, marginTop: 2 }}>
+                  {moments.length} captured
+                </Text>
+              )}
+            </View>
+
+            {/* Theme toggle + Add button */}
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
               <TouchableOpacity
-                onPress={() => router.back()}
+                onPress={() => setIsDark(!isDark)}
                 style={{
-                  width: 32, height: 32, borderRadius: 10,
+                  width: 36, height: 36, borderRadius: 12,
                   alignItems: 'center', justifyContent: 'center',
                   backgroundColor: theme.toggleBg,
                 }}
               >
-                <ChevronLeft size={20} color={theme.textMuted} />
+                {isDark ? <Sun size={18} color={theme.textMuted} /> : <Moon size={18} color={theme.textMuted} />}
               </TouchableOpacity>
-              <View>
-                <Text style={{ fontSize: 24, fontWeight: '600', color: theme.text, letterSpacing: -0.5 }}>
-                  Moments
-                </Text>
-                {moments.length > 0 && (
-                  <Text style={{ fontSize: 13, color: theme.textFaint, marginTop: 2 }}>
-                    {moments.length} captured
-                  </Text>
-                )}
-              </View>
-            </View>
-
-            {/* View + Theme toggle */}
-            <View style={{
-              flexDirection: 'row', alignItems: 'center', backgroundColor: theme.toggleBg,
-              borderRadius: 12, padding: 3,
-            }}>
               <TouchableOpacity
-                onPress={() => setViewMode('grid')}
+                onPress={() => router.push('/capture')}
+                activeOpacity={0.8}
                 style={{
-                  padding: 8, borderRadius: 9,
-                  backgroundColor: viewMode === 'grid' ? theme.accentBg : 'transparent',
+                  width: 36, height: 36, borderRadius: 12,
+                  alignItems: 'center', justifyContent: 'center',
+                  backgroundColor: theme.accentBg,
                 }}
               >
-                <Grid3X3 size={16} color={viewMode === 'grid' ? theme.accentText : theme.textMuted} />
-              </TouchableOpacity>
-              <TouchableOpacity
-                onPress={() => setViewMode('list')}
-                style={{
-                  padding: 8, borderRadius: 9,
-                  backgroundColor: viewMode === 'list' ? theme.accentBg : 'transparent',
-                }}
-              >
-                <List size={16} color={viewMode === 'list' ? theme.accentText : theme.textMuted} />
-              </TouchableOpacity>
-              <View style={{ width: 1, height: 16, backgroundColor: theme.divider, marginHorizontal: 3 }} />
-              <TouchableOpacity
-                onPress={() => setIsDark(!isDark)}
-                style={{ padding: 8, borderRadius: 9 }}
-              >
-                {isDark ? <Sun size={16} color={theme.textMuted} /> : <Moon size={16} color={theme.textMuted} />}
+                <Plus size={18} color={theme.accentText} />
               </TouchableOpacity>
             </View>
           </View>
+        </View>
 
-          {/* Filter + Add row */}
-          <View style={{ flexDirection: 'row', gap: 8, marginTop: 16 }}>
-            <TouchableOpacity
-              onPress={() => setShowFilters(!showFilters)}
-              style={{
-                flexDirection: 'row', alignItems: 'center', gap: 6,
-                paddingHorizontal: 12, paddingVertical: 8, borderRadius: 12,
-                backgroundColor: hasActiveFilters ? theme.filterActiveBg : theme.cardBg,
-                borderWidth: 1,
-                borderColor: hasActiveFilters ? theme.filterActiveBorder : theme.cardBorder,
-              }}
-            >
-              <SlidersHorizontal size={14} color={hasActiveFilters ? theme.filterActiveText : theme.textMuted} />
-              <Text style={{ fontSize: 13, color: hasActiveFilters ? theme.filterActiveText : theme.textMuted }}>
-                Filters{hasActiveFilters ? ` (${selectedMoods.length + (dateFilter !== 'today' ? 1 : 0)})` : ''}
-              </Text>
-            </TouchableOpacity>
-
+        {moments.length === 0 ? (
+          /* ===== Empty State ===== */
+          <View style={{ alignItems: 'center', paddingTop: 80 }}>
+            <View style={{
+              width: 80, height: 80, borderRadius: 24,
+              backgroundColor: theme.cardBg,
+              borderWidth: 1, borderColor: theme.cardBorder,
+              alignItems: 'center', justifyContent: 'center', marginBottom: 20,
+            }}>
+              <Sun size={36} color={theme.textFaint} />
+            </View>
+            <Text style={{ fontSize: 17, fontWeight: '500', color: theme.text, marginBottom: 8 }}>
+              No moments yet
+            </Text>
+            <Text style={{ fontSize: 14, color: theme.textFaint, textAlign: 'center', lineHeight: 20, paddingHorizontal: 40 }}>
+              What's on your mind? Capture it.
+            </Text>
             <TouchableOpacity
               onPress={() => router.push('/capture')}
-              style={{
-                flexDirection: 'row', alignItems: 'center', gap: 6,
-                paddingHorizontal: 12, paddingVertical: 8, borderRadius: 12,
-                backgroundColor: theme.accentBg,
-              }}
+              activeOpacity={0.8}
+              style={{ marginTop: 24 }}
             >
-              <Plus size={14} color={theme.accentText} />
-              <Text style={{ fontSize: 13, fontWeight: '500', color: theme.accentText }}>Add</Text>
+              <View style={{
+                flexDirection: 'row', alignItems: 'center', gap: 8,
+                paddingHorizontal: 20, paddingVertical: 12, borderRadius: 16,
+                backgroundColor: theme.accentBg,
+              }}>
+                <Plus size={16} color={theme.accentText} />
+                <Text style={{ fontSize: 14, fontWeight: '500', color: theme.accentText }}>Capture a moment</Text>
+              </View>
             </TouchableOpacity>
+          </View>
+        ) : (
+          <>
+            {/* ===== Mood Landscape Hero ===== */}
+            <MoodLandscapeHero moments={moments} theme={theme} />
 
-            {moments.length > 0 && (
+            {/* ===== Revisit Card ===== */}
+            <RevisitCard
+              moments={moments}
+              theme={theme}
+              onOpenMoment={setSelectedMoment}
+            />
+
+            {/* ===== View Toggle ===== */}
+            <View style={{
+              flexDirection: 'row', marginHorizontal: 20, marginTop: 16,
+              backgroundColor: theme.toggleBg, borderRadius: 14, padding: 3,
+            }}>
               <TouchableOpacity
-                onPress={() => {
-                  const rand = moments[Math.floor(Math.random() * moments.length)]
-                  setSelectedMoment(rand)
-                }}
+                onPress={() => setViewMode('gallery')}
                 style={{
-                  flexDirection: 'row', alignItems: 'center', gap: 6,
-                  paddingHorizontal: 12, paddingVertical: 8, borderRadius: 12,
-                  backgroundColor: theme.cardBg,
-                  borderWidth: 1, borderColor: theme.cardBorder,
+                  flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
+                  paddingVertical: 10, borderRadius: 11,
+                  backgroundColor: viewMode === 'gallery' ? theme.accentBg : 'transparent',
                 }}
               >
-                <Sparkles size={14} color={theme.textMuted} />
-                <Text style={{ fontSize: 13, color: theme.textMuted }}>Revisit</Text>
-              </TouchableOpacity>
-            )}
-          </View>
-
-          {/* Filter panel */}
-          {showFilters && (
-            <View style={{
-              marginTop: 12, padding: 16, borderRadius: 20,
-              backgroundColor: theme.cardBg,
-              borderWidth: 1, borderColor: theme.cardBorder,
-            }}>
-              {/* Date filter */}
-              <Text style={{ fontSize: 11, color: theme.textMuted, fontWeight: '600', letterSpacing: 1, marginBottom: 8 }}>
-                TIME PERIOD
-              </Text>
-              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 16 }}>
-                {([
-                  { value: 'today', label: 'Today' },
-                  { value: 'week', label: 'This week' },
-                  { value: 'month', label: 'This month' },
-                  { value: 'all', label: 'All' },
-                ] as const).map(opt => (
-                  <TouchableOpacity
-                    key={opt.value}
-                    onPress={() => setDateFilter(opt.value)}
-                    style={{
-                      paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8,
-                      backgroundColor: dateFilter === opt.value ? theme.accentBg : theme.cardBg,
-                    }}
-                  >
-                    <Text style={{
-                      fontSize: 13,
-                      color: dateFilter === opt.value ? theme.accentText : theme.textMuted,
-                      fontWeight: dateFilter === opt.value ? '600' : '400',
-                    }}>
-                      {opt.label}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-
-              {/* Mood filter */}
-              <Text style={{ fontSize: 11, color: theme.textMuted, fontWeight: '600', letterSpacing: 1, marginBottom: 8 }}>
-                EMOTIONS
-              </Text>
-              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-                {MOOD_OPTIONS.map(mood => (
-                  <TouchableOpacity
-                    key={mood}
-                    onPress={() => toggleMood(mood)}
-                    style={{
-                      flexDirection: 'row', alignItems: 'center', gap: 4,
-                      paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8,
-                      backgroundColor: selectedMoods.includes(mood) ? theme.accentBg : theme.cardBg,
-                    }}
-                  >
-                    {selectedMoods.includes(mood) && <Check size={12} color={theme.accentText} />}
-                    <Text style={{
-                      fontSize: 13, textTransform: 'capitalize',
-                      color: selectedMoods.includes(mood) ? theme.accentText : theme.textMuted,
-                    }}>
-                      {mood}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-
-              {hasActiveFilters && (
-                <TouchableOpacity
-                  onPress={() => { setSelectedMoods([]); setDateFilter('today') }}
-                  style={{ marginTop: 12 }}
-                >
-                  <Text style={{ fontSize: 13, color: theme.textMuted }}>Clear filters</Text>
-                </TouchableOpacity>
-              )}
-            </View>
-          )}
-        </View>
-
-        {/* Mood Insights */}
-        {moments.length > 0 && (
-          <View style={{ paddingHorizontal: 20, marginTop: 12, marginBottom: 8 }}>
-            <View style={{
-              borderRadius: 24, padding: 20,
-              backgroundColor: theme.cardBg,
-              borderWidth: 1, borderColor: theme.cardBorder,
-            }}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 10 }}>
-                <LinearGradient
-                  colors={['#fb7185', '#ec4899']}
-                  style={{ width: 32, height: 32, borderRadius: 10, alignItems: 'center', justifyContent: 'center' }}
-                >
-                  <Heart size={16} color="#ffffff" />
-                </LinearGradient>
-                <View>
-                  <Text style={{ fontSize: 14, fontWeight: '600', color: theme.text }}>How you're doing</Text>
-                  <Text style={{ fontSize: 11, color: theme.textFaint }}>This week</Text>
-                </View>
-              </View>
-
-              <Text style={{ fontSize: 14, color: theme.textMuted, lineHeight: 20, marginBottom: 12 }}>
-                {getInsight()}
-              </Text>
-
-              {sortedMoods.length > 0 && (
-                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
-                  {sortedMoods.slice(0, 4).map(([mood, count]) => (
-                    <View key={mood} style={{
-                      paddingHorizontal: 10, paddingVertical: 5, borderRadius: 999,
-                      backgroundColor: POSITIVE_MOODS.includes(mood) ? 'rgba(16,185,129,0.15)' : 'rgba(139,92,246,0.15)',
-                    }}>
-                      <Text style={{
-                        fontSize: 12, fontWeight: '500', textTransform: 'capitalize',
-                        color: POSITIVE_MOODS.includes(mood) ? '#6ee7b7' : '#c4b5fd',
-                      }}>
-                        {mood} x{count}
-                      </Text>
-                    </View>
-                  ))}
-                </View>
-              )}
-            </View>
-          </View>
-        )}
-
-        {/* Content */}
-        <View style={{ paddingHorizontal: 20, marginTop: 8 }}>
-          {/* Date filter chips - always visible */}
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={{ gap: 8, marginBottom: 16 }}
-          >
-            {([
-              { value: 'today', label: 'Today' },
-              { value: 'week', label: 'This week' },
-              { value: 'month', label: 'This month' },
-              { value: 'all', label: 'All time' },
-            ] as const).map(opt => (
-              <TouchableOpacity
-                key={opt.value}
-                onPress={() => setDateFilter(opt.value)}
-                style={{
-                  paddingHorizontal: 14, paddingVertical: 7, borderRadius: 999,
-                  backgroundColor: dateFilter === opt.value ? theme.accentBg : theme.cardBg,
-                  borderWidth: 1,
-                  borderColor: dateFilter === opt.value ? theme.accentBg : theme.cardBorder,
-                }}
-              >
+                <LayoutGrid size={15} color={viewMode === 'gallery' ? theme.accentText : theme.textMuted} />
                 <Text style={{
-                  fontSize: 13, fontWeight: dateFilter === opt.value ? '600' : '400',
-                  color: dateFilter === opt.value ? theme.accentText : theme.textMuted,
+                  fontSize: 13, fontWeight: '600',
+                  color: viewMode === 'gallery' ? theme.accentText : theme.textMuted,
                 }}>
-                  {opt.label}
+                  Gallery
                 </Text>
               </TouchableOpacity>
-            ))}
-          </ScrollView>
-
-          {filteredMoments.length === 0 && moments.length === 0 ? (
-            /* Empty state - no moments at all */
-            <View style={{ alignItems: 'center', paddingTop: 60 }}>
-              <View style={{
-                width: 80, height: 80, borderRadius: 24,
-                backgroundColor: theme.cardBg,
-                borderWidth: 1, borderColor: theme.cardBorder,
-                alignItems: 'center', justifyContent: 'center', marginBottom: 20,
-              }}>
-                <Sun size={36} color={theme.textFaint} />
-              </View>
-              <Text style={{ fontSize: 17, fontWeight: '500', color: theme.text, marginBottom: 8 }}>
-                No moments yet
-              </Text>
-              <Text style={{ fontSize: 14, color: theme.textFaint, textAlign: 'center', lineHeight: 20, paddingHorizontal: 40 }}>
-                What's on your mind? Capture it.
-              </Text>
               <TouchableOpacity
-                onPress={() => router.push('/capture')}
-                activeOpacity={0.8}
-                style={{ marginTop: 24 }}
+                onPress={() => setViewMode('calendar')}
+                style={{
+                  flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
+                  paddingVertical: 10, borderRadius: 11,
+                  backgroundColor: viewMode === 'calendar' ? theme.accentBg : 'transparent',
+                }}
               >
-                <View style={{
-                  flexDirection: 'row', alignItems: 'center', gap: 8,
-                  paddingHorizontal: 20, paddingVertical: 12, borderRadius: 16,
-                  backgroundColor: theme.accentBg,
+                <Calendar size={15} color={viewMode === 'calendar' ? theme.accentText : theme.textMuted} />
+                <Text style={{
+                  fontSize: 13, fontWeight: '600',
+                  color: viewMode === 'calendar' ? theme.accentText : theme.textMuted,
                 }}>
-                  <Plus size={16} color={theme.accentText} />
-                  <Text style={{ fontSize: 14, fontWeight: '500', color: theme.accentText }}>Capture a moment</Text>
-                </View>
+                  Calendar
+                </Text>
               </TouchableOpacity>
             </View>
-          ) : filteredMoments.length === 0 ? (
-            /* No results for current filter */
-            <View style={{ alignItems: 'center', paddingTop: 40 }}>
-              <View style={{
-                width: 56, height: 56, borderRadius: 16,
-                backgroundColor: theme.cardBg,
-                alignItems: 'center', justifyContent: 'center', marginBottom: 12,
-              }}>
-                <Sun size={24} color={theme.textFaint} />
-              </View>
-              <Text style={{ fontSize: 15, fontWeight: '500', color: theme.text, marginBottom: 4 }}>
-                {dateFilter === 'today' ? 'No moments today yet' : 'No moments found'}
-              </Text>
-              <Text style={{ fontSize: 13, color: theme.textFaint, textAlign: 'center', marginBottom: 16 }}>
-                {dateFilter === 'today' ? "What's on your mind? Capture it." : 'Try a different filter.'}
-              </Text>
-              {dateFilter === 'today' && moments.length > 0 && (
-                <TouchableOpacity onPress={() => setDateFilter('all')} style={{ marginBottom: 12 }}>
-                  <Text style={{ fontSize: 14, color: theme.textMuted, textDecorationLine: 'underline' }}>
-                    View past moments ({moments.length})
-                  </Text>
-                </TouchableOpacity>
-              )}
-              <TouchableOpacity
-                onPress={() => router.push('/capture')}
-                activeOpacity={0.8}
-              >
-                <View style={{
-                  flexDirection: 'row', alignItems: 'center', gap: 8,
-                  paddingHorizontal: 20, paddingVertical: 12, borderRadius: 16,
-                  backgroundColor: theme.accentBg,
-                }}>
-                  <Plus size={16} color={theme.accentText} />
-                  <Text style={{ fontSize: 14, fontWeight: '500', color: theme.accentText }}>Capture a moment</Text>
-                </View>
-              </TouchableOpacity>
-            </View>
-          ) : viewMode === 'grid' ? (
-            /* Grid View - 2 columns */
-            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 12 }}>
-              {filteredMoments.map((m) => {
-                const isPhoto = m.type === 'photo' && m.media_url
-                const isVideo = m.type === 'video' && m.media_url
-                const isVoice = m.type === 'voice' && m.media_url
 
-                return (
-                  <TouchableOpacity
-                    key={m.id}
-                    onPress={() => setSelectedMoment(m)}
-                    activeOpacity={0.8}
-                    style={{
-                      width: gridCardWidth,
-                      borderRadius: 16, overflow: 'hidden',
-                      backgroundColor: theme.cardBg,
-                      borderWidth: 1, borderColor: theme.cardBorder,
-                      padding: 12,
-                      minHeight: 140,
-                    }}
-                  >
-                    {/* Media thumbnail */}
-                    {isPhoto && (
-                      <Image
-                        source={{ uri: m.media_url! }}
-                        style={{
-                          width: '100%', aspectRatio: 16 / 9,
-                          borderRadius: 12, marginBottom: 10,
-                        }}
-                        resizeMode="cover"
-                      />
-                    )}
-
-                    {isVideo && (
-                      <View style={{
-                        width: '100%', aspectRatio: 16 / 9,
-                        borderRadius: 12, marginBottom: 10,
-                        backgroundColor: theme.videoBg,
-                        alignItems: 'center', justifyContent: 'center',
-                      }}>
-                        <View style={{
-                          width: 36, height: 36, borderRadius: 18,
-                          backgroundColor: theme.videoPlayBg,
-                          alignItems: 'center', justifyContent: 'center',
-                        }}>
-                          <Play size={16} color="#ffffff" style={{ marginLeft: 2 }} />
-                        </View>
-                      </View>
-                    )}
-
-                    {isVoice && (
-                      <LinearGradient
-                        colors={[theme.voiceGrad1, theme.voiceGrad2]}
-                        style={{
-                          width: '100%', aspectRatio: 16 / 9,
-                          borderRadius: 12, marginBottom: 10,
-                          alignItems: 'center', justifyContent: 'center',
-                        }}
-                      >
-                        {/* Waveform bars */}
-                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 2 }}>
-                          {Array.from({ length: 10 }).map((_, i) => (
-                            <View key={i} style={{
-                              width: 3, borderRadius: 2,
-                              height: 8 + Math.random() * 16,
-                              backgroundColor: theme.voiceBar,
-                            }} />
-                          ))}
-                        </View>
-                      </LinearGradient>
-                    )}
-
-                    {!isPhoto && !isVideo && !isVoice && !m.text_content && !m.caption && (
-                      <LinearGradient
-                        colors={[theme.writeGrad1, theme.writeGrad2]}
-                        style={{
-                          width: '100%', aspectRatio: 16 / 9,
-                          borderRadius: 12, marginBottom: 10,
-                          alignItems: 'center', justifyContent: 'center',
-                        }}
-                      >
-                        <PenLine size={28} color={theme.writeIcon} />
-                      </LinearGradient>
-                    )}
-
-                    {/* Text content */}
-                    {(m.text_content || m.caption) && (
-                      <Text
-                        style={{ fontSize: 13, color: theme.text, lineHeight: 18, flex: 1 }}
-                        numberOfLines={3}
-                      >
-                        {m.text_content || m.caption}
-                      </Text>
-                    )}
-
-                    {/* Bottom: moods + time */}
-                    <View style={{
-                      flexDirection: 'row', alignItems: 'center',
-                      justifyContent: 'space-between', marginTop: 'auto', paddingTop: 8,
-                    }}>
-                      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 4, flex: 1 }}>
-                        {m.moods?.slice(0, 2).map(mood => (
-                          <View key={mood} style={{
-                            paddingHorizontal: 6, paddingVertical: 2, borderRadius: 999,
-                            backgroundColor: theme.moodTagBg,
-                          }}>
-                            <Text style={{ fontSize: 10, color: theme.moodTagText, textTransform: 'capitalize' }}>
-                              {mood}
-                            </Text>
-                          </View>
-                        ))}
-                        {(m.moods?.length ?? 0) > 2 && (
-                          <Text style={{ fontSize: 10, color: theme.textFaint }}>
-                            +{m.moods!.length - 2}
-                          </Text>
-                        )}
-                      </View>
-                      <Text style={{ fontSize: 11, color: theme.textFaint }}>
-                        {getTimeAgo(m.created_at)}
-                      </Text>
-                    </View>
-                  </TouchableOpacity>
-                )
-              })}
-            </View>
-          ) : (
-            /* List View */
-            <View style={{ gap: 8 }}>
-              {filteredMoments.map((m) => (
-                <TouchableOpacity
-                  key={m.id}
-                  onPress={() => setSelectedMoment(m)}
-                  activeOpacity={0.8}
-                  style={{
-                    flexDirection: 'row', alignItems: 'center', gap: 14,
-                    padding: 12, borderRadius: 16,
-                    backgroundColor: theme.cardBg,
-                    borderWidth: 1, borderColor: theme.cardBorder,
-                  }}
-                >
-                  {/* Thumbnail */}
-                  {m.type === 'photo' && m.media_url ? (
-                    <Image
-                      source={{ uri: m.media_url }}
-                      style={{ width: 56, height: 56, borderRadius: 12 }}
-                      resizeMode="cover"
-                    />
-                  ) : m.type === 'voice' && m.media_url ? (
-                    <LinearGradient
-                      colors={[theme.voiceGrad1, theme.voiceGrad2]}
-                      style={{
-                        width: 56, height: 56, borderRadius: 12,
-                        alignItems: 'center', justifyContent: 'center',
-                      }}
-                    >
-                      <Play size={18} color={theme.voicePlayIcon} style={{ marginLeft: 2 }} />
-                    </LinearGradient>
-                  ) : (
-                    <LinearGradient
-                      colors={typeGradient(m.type)}
-                      style={{
-                        width: 56, height: 56, borderRadius: 12,
-                        alignItems: 'center', justifyContent: 'center', opacity: 0.7,
-                      }}
-                    >
-                      <TypeIcon type={m.type} size={22} />
-                    </LinearGradient>
-                  )}
-
-                  {/* Content */}
-                  <View style={{ flex: 1 }}>
-                    <Text style={{ fontSize: 14, color: theme.text }} numberOfLines={1}>
-                      {m.text_content || m.caption || `${m.type.charAt(0).toUpperCase() + m.type.slice(1)} moment`}
-                    </Text>
-                    {m.moods && m.moods.length > 0 && (
-                      <View style={{ flexDirection: 'row', gap: 4, marginTop: 6, flexWrap: 'wrap' }}>
-                        {m.moods.slice(0, 3).map(mood => (
-                          <View key={mood} style={{
-                            paddingHorizontal: 6, paddingVertical: 2, borderRadius: 999,
-                            backgroundColor: theme.moodTagBg,
-                          }}>
-                            <Text style={{ fontSize: 10, color: theme.moodTagText, textTransform: 'capitalize' }}>
-                              {mood}
-                            </Text>
-                          </View>
-                        ))}
-                        {m.moods.length > 3 && (
-                          <Text style={{ fontSize: 10, color: theme.textFaint, alignSelf: 'center' }}>
-                            +{m.moods.length - 3}
-                          </Text>
-                        )}
-                      </View>
-                    )}
-                    <Text style={{ fontSize: 11, color: theme.textFaint, marginTop: 4 }}>
-                      {getTimeAgo(m.created_at)}
-                    </Text>
-                  </View>
-                </TouchableOpacity>
-              ))}
-            </View>
-          )}
-        </View>
+            {/* ===== Calendar or Gallery ===== */}
+            {viewMode === 'calendar' ? (
+              <CalendarView
+                moments={moments}
+                theme={theme}
+                isDark={isDark}
+                onOpenMoment={setSelectedMoment}
+              />
+            ) : (
+              <GalleryView
+                moments={moments}
+                theme={theme}
+                isDark={isDark}
+                onOpenMoment={setSelectedMoment}
+              />
+            )}
+          </>
+        )}
       </ScrollView>
 
-      {/* Moment Detail Modal */}
+      {/* ===== Moment Detail Modal ===== */}
       <Modal
         visible={!!selectedMoment}
         transparent
@@ -1313,9 +1705,14 @@ export default function MomentsScreen() {
                         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
                           {selectedMoment.moods.map(mood => (
                             <View key={mood} style={{
+                              flexDirection: 'row', alignItems: 'center', gap: 5,
                               paddingHorizontal: 12, paddingVertical: 6, borderRadius: 999,
-                              backgroundColor: theme.moodTagBg,
+                              backgroundColor: `${MOOD_COLORS[mood] || '#6b7280'}20`,
                             }}>
+                              <View style={{
+                                width: 6, height: 6, borderRadius: 3,
+                                backgroundColor: MOOD_COLORS[mood] || '#6b7280',
+                              }} />
                               <Text style={{ fontSize: 13, color: isDark ? 'rgba(255,255,255,0.7)' : '#374151', textTransform: 'capitalize' }}>
                                 {mood}
                               </Text>
@@ -1332,10 +1729,10 @@ export default function MomentsScreen() {
         </Pressable>
       </Modal>
 
-      {/* Bloom pill at bottom */}
+      {/* ===== Bloom Pill ===== */}
       <BloomPill isDark={isDark} onPress={() => setIsBloomOpen(true)} />
 
-      {/* Bloom Chat Modal */}
+      {/* ===== Bloom Chat Modal ===== */}
       <BloomChatModal isOpen={isBloomOpen} onClose={() => setIsBloomOpen(false)} isDark={isDark} />
     </SafeAreaView>
   )
