@@ -41,6 +41,7 @@ import {
 import { useAuth } from '@/lib/auth-context'
 import { getMemberMoments, deleteMoment, type Moment } from '@/lib/services/moments'
 import { useBloomChat, type BloomMessage } from '@/lib/hooks/useBloomChat'
+import { getUserPreferences, updateUserPreferences } from '@/lib/services/preferences'
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window')
 
@@ -1421,6 +1422,19 @@ export default function MomentsScreen() {
     setLoading(false)
   }, [user?.id])
 
+  // Load saved theme preference
+  useEffect(() => {
+    getUserPreferences().then(prefs => {
+      setIsDark(prefs.moments_theme === 'dark')
+    })
+  }, [])
+
+  function toggleTheme() {
+    const next = !isDark
+    setIsDark(next)
+    updateUserPreferences({ moments_theme: next ? 'dark' : 'light' })
+  }
+
   useFocusEffect(useCallback(() => { fetchMoments() }, [fetchMoments]))
 
   async function onRefresh() {
@@ -1531,7 +1545,7 @@ export default function MomentsScreen() {
             {/* Theme toggle + Add button */}
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
               <TouchableOpacity
-                onPress={() => setIsDark(!isDark)}
+                onPress={toggleTheme}
                 style={{
                   width: 36, height: 36, borderRadius: 12,
                   alignItems: 'center', justifyContent: 'center',
