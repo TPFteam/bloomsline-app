@@ -1169,15 +1169,20 @@ function GalleryView({
   onOpenMoment: (m: Moment) => void
 }) {
   const now = new Date()
+  const INITIAL_LIMIT = 20
+  const [visibleCount, setVisibleCount] = useState(INITIAL_LIMIT)
+
+  const visibleMoments = useMemo(() => moments.slice(0, visibleCount), [moments, visibleCount])
+  const hasMore = moments.length > visibleCount
+  const remaining = moments.length - visibleCount
 
   const weeklyGroups = useMemo(() => {
-    if (moments.length === 0) return []
+    if (visibleMoments.length === 0) return []
 
     const groups: { label: string; moments: Moment[]; dominantMood: string | null }[] = []
     const groupMap = new Map<string, Moment[]>()
 
-    // Group moments by week label
-    moments.forEach(m => {
+    visibleMoments.forEach(m => {
       const label = getWeekLabel(new Date(m.created_at), now)
       if (!groupMap.has(label)) groupMap.set(label, [])
       groupMap.get(label)!.push(m)
@@ -1192,7 +1197,7 @@ function GalleryView({
     })
 
     return groups
-  }, [moments])
+  }, [visibleMoments])
 
   const colWidth = (SCREEN_WIDTH - 40 - 10) / 2 // 20px padding each side, 10px gap
 
@@ -1254,6 +1259,22 @@ function GalleryView({
           </View>
         </View>
       ))}
+
+      {/* View more */}
+      {hasMore && (
+        <TouchableOpacity
+          onPress={() => setVisibleCount(prev => prev + 20)}
+          activeOpacity={0.7}
+          style={{
+            alignItems: 'center', paddingVertical: 14, borderRadius: 14,
+            backgroundColor: theme.toggleBg, marginBottom: 8,
+          }}
+        >
+          <Text style={{ fontSize: 14, fontWeight: '600', color: theme.textMuted }}>
+            View more ({remaining})
+          </Text>
+        </TouchableOpacity>
+      )}
     </View>
   )
 }
