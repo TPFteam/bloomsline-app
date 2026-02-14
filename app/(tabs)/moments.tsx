@@ -1429,23 +1429,36 @@ export default function MomentsScreen() {
     setRefreshing(false)
   }
 
-  async function handleDelete(momentId: string) {
-    Alert.alert('Delete moment', 'Are you sure you want to delete this moment?', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Delete',
-        style: 'destructive',
-        onPress: async () => {
-          setDeleting(true)
-          const success = await deleteMoment(momentId)
-          if (success) {
-            setMoments(prev => prev.filter(m => m.id !== momentId))
-            setSelectedMoment(null)
-          }
-          setDeleting(false)
+  async function performDelete(momentId: string) {
+    setDeleting(true)
+    try {
+      const success = await deleteMoment(momentId)
+      if (success) {
+        setMoments(prev => prev.filter(m => m.id !== momentId))
+        setSelectedMoment(null)
+      }
+    } catch (e) {
+      console.error('Delete failed:', e)
+    } finally {
+      setDeleting(false)
+    }
+  }
+
+  function handleDelete(momentId: string) {
+    if (Platform.OS === 'web') {
+      if (confirm('Are you sure you want to delete this moment?')) {
+        performDelete(momentId)
+      }
+    } else {
+      Alert.alert('Delete moment', 'Are you sure you want to delete this moment?', [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: () => performDelete(momentId),
         },
-      },
-    ])
+      ])
+    }
   }
 
   // Theme
@@ -1644,14 +1657,14 @@ export default function MomentsScreen() {
           style={{ flex: 1, backgroundColor: isDark ? 'rgba(0,0,0,0.9)' : 'rgba(0,0,0,0.4)', justifyContent: 'flex-end' }}
           onPress={() => setSelectedMoment(null)}
         >
-          <Pressable
+          <View
+            onStartShouldSetResponder={() => true}
             style={{
               backgroundColor: isDark ? '#111113' : '#ffffff',
               borderTopLeftRadius: 28,
               borderTopRightRadius: 28,
               maxHeight: '90%',
             }}
-            onPress={() => {}}
           >
             {selectedMoment && (
               <>
@@ -1746,7 +1759,7 @@ export default function MomentsScreen() {
                 </ScrollView>
               </>
             )}
-          </Pressable>
+          </View>
         </Pressable>
       </Modal>
 
