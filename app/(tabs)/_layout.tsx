@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { View, Text, TouchableOpacity, Modal, Pressable, Alert, Animated, Platform } from 'react-native'
-import { Tabs, useRouter } from 'expo-router'
+import { Tabs, useRouter, useSegments } from 'expo-router'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { LinearGradient } from 'expo-linear-gradient'
 import {
@@ -74,7 +74,11 @@ export default function TabLayout() {
   const safeBottom = Math.max(insets.bottom, 16)
   const [showMenu, setShowMenu] = useState(false)
   const router = useRouter()
+  const segments = useSegments()
   const { signOut } = useAuth()
+
+  // Hide tab bar on Moments screen (per-screen tabBarStyle is unreliable in production)
+  const hideTabBar = segments[segments.length - 1] === 'moments'
 
   function handleSignOut() {
     setShowMenu(false)
@@ -95,8 +99,12 @@ export default function TabLayout() {
           headerShown: false,
           tabBarActiveTintColor: '#059669',
           tabBarInactiveTintColor: '#a3a3a3',
-          tabBarStyle: {
-            position: 'absolute',
+          tabBarStyle: hideTabBar ? {
+            display: 'none' as const,
+            height: 0,
+            overflow: 'hidden' as const,
+          } : {
+            position: 'absolute' as const,
             bottom: safeBottom,
             left: 16,
             right: 16,
@@ -111,7 +119,7 @@ export default function TabLayout() {
             height: 88,
             paddingTop: 14,
             paddingBottom: 18,
-            overflow: 'visible',
+            overflow: 'visible' as const,
           },
           tabBarLabelStyle: {
             fontSize: 11,
@@ -132,7 +140,6 @@ export default function TabLayout() {
           options={{
             title: 'Moments',
             tabBarIcon: ({ color }) => <Sun size={22} color={color} />,
-            tabBarStyle: { display: 'none' },
           }}
         />
         <Tabs.Screen
@@ -168,7 +175,7 @@ export default function TabLayout() {
         <Tabs.Screen name="settings" options={{ href: null }} />
       </Tabs>
 
-      <FloatingCameraButton />
+      {!hideTabBar && <FloatingCameraButton />}
 
       {/* Menu Popup */}
       <Modal
