@@ -20,6 +20,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { LinearGradient } from 'expo-linear-gradient'
 import * as Sharing from 'expo-sharing'
+import * as MediaLibrary from 'expo-media-library'
 import { captureRef } from 'react-native-view-shot'
 import { useRouter, useFocusEffect } from 'expo-router'
 import { Video as AVVideo, ResizeMode } from 'expo-av'
@@ -42,6 +43,7 @@ import {
   ChevronRight as ChevronRightIcon,
   Shuffle,
   Share2,
+  Download,
   MessageCircle,
   Pause,
   Maximize2,
@@ -2534,6 +2536,42 @@ export default function MomentsScreen() {
     }
   }
 
+  async function handleDownload(moment: Moment) {
+    if (!moment.media_url) return
+
+    try {
+      if (Platform.OS === 'web') {
+        const link = document.createElement('a')
+        link.href = moment.media_url
+        link.download = `moment-${moment.id}.${moment.type === 'video' ? 'mp4' : 'jpg'}`
+        link.target = '_blank'
+        document.body.appendChild(link)
+        link.click()
+        document.body.removeChild(link)
+        return
+      }
+
+      const { status } = await MediaLibrary.requestPermissionsAsync()
+      if (status !== 'granted') {
+        Alert.alert('Permission needed', 'Please allow access to save media to your device.')
+        return
+      }
+
+      // Use expo-file-system legacy API (cacheDirectory)
+      const ExpoFS = require('expo-file-system')
+      const ext = moment.type === 'video' ? 'mp4' : 'jpg'
+      const localUri = ExpoFS.cacheDirectory + `moment-${moment.id}.${ext}`
+
+      const download = await ExpoFS.downloadAsync(moment.media_url, localUri)
+      await MediaLibrary.saveToLibraryAsync(download.uri)
+
+      Alert.alert('Saved', `${moment.type === 'video' ? 'Video' : 'Photo'} saved to your library.`)
+    } catch (e) {
+      console.error('Download failed:', e)
+      Alert.alert('Error', 'Could not save to your library.')
+    }
+  }
+
   // Theme
   const theme = {
     bg: isDark ? '#0c0c0e' : '#f5f3ef',
@@ -2778,6 +2816,14 @@ export default function MomentsScreen() {
                     </Text>
                   </View>
                   <View style={{ flexDirection: 'row', gap: 4 }}>
+                    {(selectedMoment.type === 'photo' || selectedMoment.type === 'video') && selectedMoment.media_url && (
+                      <TouchableOpacity
+                        onPress={() => handleDownload(selectedMoment)}
+                        style={{ padding: 10, borderRadius: 12, backgroundColor: theme.cardBg }}
+                      >
+                        <Download size={18} color={theme.textFaint} />
+                      </TouchableOpacity>
+                    )}
                     <TouchableOpacity
                       onPress={() => handleDelete(selectedMoment.id)}
                       style={{ padding: 10, borderRadius: 12, backgroundColor: theme.cardBg }}

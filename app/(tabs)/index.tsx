@@ -310,6 +310,7 @@ export default function HomeScreen() {
   const [selectedDate, setSelectedDate] = useState(new Date())
   const [zoomLevel, setZoomLevel] = useState(1)
   const [centerHour, setCenterHour] = useState(12)
+  const flowScrollRef = useRef<ScrollView>(null)
   const [currentTime, setCurrentTime] = useState(new Date())
   const [viewingMoment, setViewingMoment] = useState<MomentItem | null>(null)
   const [memberRituals, setMemberRituals] = useState<MemberRitual[]>([])
@@ -475,19 +476,27 @@ export default function HomeScreen() {
   }
 
   // Zoom helpers
+  const flowContainerWidth = SCREEN_WIDTH - 80 // padding inside the card
   const getVisibleHours = () => [24, 12, 8, 6][zoomLevel - 1] || 24
-  const getVisibleRange = () => {
-    const h = getVisibleHours()
-    let s = centerHour - h / 2
-    let e = centerHour + h / 2
-    if (s < 0) { s = 0; e = h }
-    if (e > 24) { e = 24; s = 24 - h }
-    return { startHour: s, endHour: e }
-  }
+  const flowScale = 24 / getVisibleHours() // 1x at 24h, 2x at 12h, 3x at 8h, 4x at 6h
+  const flowContentWidth = flowContainerWidth * flowScale
+
+  // Returns percentage position over the full 24h content width
   const hourToPosition = (hour: number) => {
-    const { startHour, endHour } = getVisibleRange()
-    return ((hour - startHour) / (endHour - startHour)) * 100
+    return (hour / 24) * 100
   }
+
+  // Auto-scroll flow to center on current time when zoom changes
+  useEffect(() => {
+    if (zoomLevel <= 1) return // no scroll needed at 24h
+    const scrollTarget = isToday() ? currentHour : centerHour
+    const pxPerHour = flowContentWidth / 24
+    const scrollX = scrollTarget * pxPerHour - flowContainerWidth / 2
+    const clamped = Math.max(0, Math.min(scrollX, flowContentWidth - flowContainerWidth))
+    setTimeout(() => {
+      flowScrollRef.current?.scrollTo({ x: clamped, animated: true })
+    }, 100)
+  }, [zoomLevel])
 
   function getGreeting() {
     const h = new Date().getHours()
@@ -531,7 +540,7 @@ export default function HomeScreen() {
   // Current time position for the green line
   const currentHour = currentTime.getHours() + currentTime.getMinutes() / 60
   const timePosition = hourToPosition(currentHour)
-  const flowWidth = SCREEN_WIDTH - 80 // padding
+  const flowWidth = flowContentWidth
 
   // Generate video thumbnails
   const [videoThumbs, setVideoThumbs] = useState<Record<string, string>>({})
@@ -689,12 +698,23 @@ export default function HomeScreen() {
                 </View>
               </View>
 
-              {/* Timeline visualization */}
+              {/* Timeline visualization — horizontally scrollable when zoomed */}
+              <ScrollView
+                ref={flowScrollRef}
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                scrollEnabled={zoomLevel > 1}
+                bounces={false}
+                style={{
+                  height: 160,
+                  backgroundColor: 'rgba(236, 253, 245, 0.5)',
+                  borderRadius: 16,
+                  overflow: 'hidden',
+                }}
+              >
               <View style={{
+                width: flowContentWidth,
                 height: 160,
-                backgroundColor: 'rgba(236, 253, 245, 0.5)',
-                borderRadius: 16,
-                overflow: 'hidden',
                 position: 'relative',
               }}>
                 {/* Grid lines */}
@@ -721,7 +741,7 @@ export default function HomeScreen() {
                     hour = hours + minutes / 60
                   }
                   const x = hourToPosition(hour)
-                  if (x < -5 || x > 105) return null
+                  if (x < -2 || x > 102) return null
 
                   const isPast = isToday() && hour < currentHour
                   const cat = RITUAL_CATEGORY_COLORS[mr.ritual.category] || RITUAL_CATEGORY_COLORS.morning
@@ -772,7 +792,7 @@ export default function HomeScreen() {
                   const t = new Date(log.logged_at)
                   const hour = t.getHours() + t.getMinutes() / 60
                   const x = hourToPosition(hour)
-                  if (x < -5 || x > 105) return null
+                  if (x < -2 || x > 102) return null
 
                   const anchor = anchors.find(a => a.id === log.anchor_id)
                   const isGrow = anchor?.type === 'grow'
@@ -868,7 +888,7 @@ export default function HomeScreen() {
                     const t = new Date(m.created_at)
                     const h = t.getHours() + t.getMinutes() / 60
                     const x = hourToPosition(h)
-                    if (x < -5 || x > 105) return null
+                    if (x < -2 || x > 102) return null
 
                     // Y position based on mood score
                     const score = m.moods?.[0] ? getMoodScore(m.moods[0]) : 60
@@ -971,30 +991,27 @@ export default function HomeScreen() {
                     <Text style={{ fontSize: 12, color: '#d1d5db', marginTop: 2 }}>Capture your first moment</Text>
                   </View>
                 )}
-              </View>
-
-              {/* Time labels */}
-              <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 8, paddingHorizontal: 4 }}>
-                {zoomLevel === 1 ? (
-                  <>
-                    <Text style={{ fontSize: 12, color: '#9ca3af' }}>Morning</Text>
-                    <Text style={{ fontSize: 12, color: '#9ca3af' }}>Afternoon</Text>
-                    <Text style={{ fontSize: 12, color: '#9ca3af' }}>Evening</Text>
-                  </>
-                ) : (
-                  (() => {
-                    const { startHour, endHour } = getVisibleRange()
-                    const range = endHour - startHour
-                    const step = range / 4
-                    return Array.from({ length: 5 }).map((_, i) => {
-                      const h = Math.floor(startHour + i * step)
+                {/* Time labels — inside scrollable area */}
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', position: 'absolute', bottom: 4, left: 4, right: 4 }}>
+                  {(() => {
+                    // Always show hour labels across the full 24h content
+                    const labelCount = zoomLevel === 1 ? 3 : Math.min(Math.round(24 / (getVisibleHours() / 4)), 13)
+                    const step = 24 / (labelCount - 1)
+                    if (zoomLevel === 1) {
+                      return ['Morning', 'Afternoon', 'Evening'].map((label, i) => (
+                        <Text key={i} style={{ fontSize: 12, color: '#9ca3af' }}>{label}</Text>
+                      ))
+                    }
+                    return Array.from({ length: labelCount }).map((_, i) => {
+                      const h = Math.round(i * step)
                       const p = h >= 12 ? 'PM' : 'AM'
                       const h12 = h === 0 ? 12 : h > 12 ? h - 12 : h
-                      return <Text key={i} style={{ fontSize: 11, color: '#9ca3af' }}>{h12}{p}</Text>
+                      return <Text key={i} style={{ fontSize: 10, color: '#9ca3af' }}>{h12}{p}</Text>
                     })
-                  })()
-                )}
+                  })()}
+                </View>
               </View>
+              </ScrollView>
 
               {/* Controls row */}
               <View style={{
