@@ -47,7 +47,6 @@ import {
   Meh,
   Frown,
   Angry,
-  Info,
   Calendar,
   History,
   Clock,
@@ -55,7 +54,9 @@ import {
   ChevronRight,
   ArrowLeft,
   Minus,
+  Sparkles,
 } from 'lucide-react-native'
+import { useRouter } from 'expo-router'
 import { useAuth } from '@/lib/auth-context'
 import { useRituals } from '@/lib/hooks/useRituals'
 import { type RitualCategory, type Ritual, type RitualCompletion } from '@/lib/services/rituals'
@@ -128,6 +129,7 @@ function formatTimerDisplay(seconds: number): string {
 // ============================================
 
 export default function RitualsScreen() {
+  const router = useRouter()
   const { member } = useAuth()
   const {
     memberRituals, loading, refreshing,
@@ -418,8 +420,9 @@ export default function RitualsScreen() {
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 6 }}>
           <Text style={{ fontSize: 30, fontWeight: '800', color: '#171717' }}>Rituals</Text>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 6 }}>
-            <TouchableOpacity style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: '#fff', alignItems: 'center', justifyContent: 'center', shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.04, shadowRadius: 2 }}>
-              <Info size={18} color="#9ca3af" />
+            <TouchableOpacity onPress={() => router.push('/ritual-insights')} style={{ flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#fff', borderRadius: 18, paddingHorizontal: 12, paddingVertical: 8, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.04, shadowRadius: 2 }}>
+              <Sparkles size={16} color="#f59e0b" />
+              <Text style={{ fontSize: 14, fontWeight: '600', color: '#374151' }}>Insights</Text>
             </TouchableOpacity>
             <TouchableOpacity onPress={openFullHistory} style={{ flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#fff', borderRadius: 18, paddingHorizontal: 12, paddingVertical: 8, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.04, shadowRadius: 2 }}>
               <Calendar size={16} color="#6b7280" />

@@ -48,6 +48,7 @@ function AuthGate() {
         }}
       />
       <Stack.Screen name="seeds" />
+      <Stack.Screen name="ritual-insights" />
     </Stack>
   )
 }
