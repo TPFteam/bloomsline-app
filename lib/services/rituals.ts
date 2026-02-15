@@ -35,7 +35,6 @@ export interface RitualCompletion {
   member_id: string
   completion_date: string
   completed: boolean
-  completed_at: string | null
   created_at: string
   duration_minutes: number | null
   notes: string | null
@@ -139,7 +138,6 @@ export async function toggleCompletion(
       .from('ritual_completions')
       .update({
         completed: newCompleted,
-        completed_at: newCompleted ? new Date().toISOString() : null,
       })
       .eq('id', existingCompletion.id)
       .select()
@@ -160,7 +158,6 @@ export async function toggleCompletion(
       ritual_id: ritualId,
       completion_date: todayStr,
       completed: true,
-      completed_at: new Date().toISOString(),
     })
     .select()
     .single()
@@ -185,7 +182,6 @@ export async function completeWithDetails(
       .from('ritual_completions')
       .update({
         completed: true,
-        completed_at: new Date().toISOString(),
         mood: details.mood || null,
         notes: details.notes || null,
         duration_minutes: details.durationMinutes ? Math.round(details.durationMinutes) : null,
@@ -208,7 +204,6 @@ export async function completeWithDetails(
       ritual_id: ritualId,
       completion_date: todayStr,
       completed: true,
-      completed_at: new Date().toISOString(),
       mood: details.mood || null,
       notes: details.notes || null,
       duration_minutes: details.durationMinutes ? Math.round(details.durationMinutes) : null,

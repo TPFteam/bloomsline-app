@@ -66,7 +66,7 @@ export function useRituals() {
     if (existing) {
       const newCompleted = !existing.completed
       setTodayCompletions(prev =>
-        prev.map(c => c.id === existing.id ? { ...c, completed: newCompleted, completed_at: newCompleted ? now : null } : c)
+        prev.map(c => c.id === existing.id ? { ...c, completed: newCompleted } : c)
       )
     } else {
       const tempCompletion: RitualCompletion = {
@@ -75,7 +75,6 @@ export function useRituals() {
         member_id: memberId,
         completion_date: new Date().toISOString().split('T')[0],
         completed: true,
-        completed_at: now,
         created_at: now,
         duration_minutes: null,
         notes: null,
