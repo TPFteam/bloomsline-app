@@ -12,6 +12,7 @@ import {
   Platform,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
+import { useRouter } from 'expo-router'
 import { LinearGradient } from 'expo-linear-gradient'
 import * as ImagePicker from 'expo-image-picker'
 import {
@@ -137,7 +138,8 @@ function getGreeting(): { text: string; Icon: typeof Lightbulb } {
 // ============================================
 
 export default function ReflectScreen() {
-  const { user, member } = useAuth()
+  const { member } = useAuth()
+  const router = useRouter()
 
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
@@ -640,6 +642,14 @@ export default function ReflectScreen() {
       >
         {/* Header */}
         <View style={{ marginBottom: 24 }}>
+          <TouchableOpacity
+            onPress={() => router.push('/(tabs)')}
+            style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 12 }}
+            activeOpacity={0.7}
+          >
+            <ArrowLeft size={18} color="#9ca3af" />
+            <Text style={{ fontSize: 13, color: '#9ca3af', fontWeight: '500' }}>Home</Text>
+          </TouchableOpacity>
           <Text style={{ fontSize: 28, fontWeight: '800', color: '#171717' }}>Reflect</Text>
           <Text style={{ fontSize: 14, color: '#9ca3af', marginTop: 4 }}>
             {greeting.text}. Your safe space.
