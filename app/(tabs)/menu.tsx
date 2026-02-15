@@ -1,32 +1,20 @@
 import { View, Text, TouchableOpacity, Alert, Platform } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useRouter } from 'expo-router'
-import { User, Settings, LogOut, BookOpen, Heart, PieChart, ChevronRight } from 'lucide-react-native'
+import { User, Settings, BookOpen, Heart, ChevronRight } from 'lucide-react-native'
 import { useAuth } from '@/lib/auth-context'
 
 export default function MenuScreen() {
-  const { user, member, signOut } = useAuth()
+  const { user, member } = useAuth()
   const router = useRouter()
 
   const fullName = member
     ? `${member.first_name} ${member.last_name}`
     : user?.user_metadata?.full_name || 'Member'
 
-  function handleSignOut() {
-    if (Platform.OS === 'web') {
-      if (confirm('Are you sure you want to sign out?')) signOut()
-    } else {
-      Alert.alert('Sign out', 'Are you sure?', [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Sign out', style: 'destructive', onPress: signOut },
-      ])
-    }
-  }
-
   const menuItems: { icon: any; label: string; color: string; route: string | null }[] = [
     { icon: Heart, label: 'Progress', color: '#059669', route: '/progress' },
     { icon: User, label: 'My Practitioner', color: '#ec4899', route: '/practitioner' },
-    { icon: PieChart, label: 'Balance', color: '#6366f1', route: '/balance' },
     { icon: BookOpen, label: 'Resources', color: '#f59e0b', route: null },
     { icon: Settings, label: 'Settings', color: '#737373', route: '/settings' },
   ]
@@ -86,18 +74,6 @@ export default function MenuScreen() {
           ))}
         </View>
 
-        {/* Sign out */}
-        <TouchableOpacity
-          onPress={handleSignOut}
-          style={{
-            flexDirection: 'row', alignItems: 'center', gap: 14,
-            paddingVertical: 14, paddingHorizontal: 4, marginTop: 24,
-            borderTopWidth: 1, borderTopColor: '#f5f5f5',
-          }}
-        >
-          <LogOut size={22} color="#ef4444" />
-          <Text style={{ fontSize: 16, fontWeight: '500', color: '#ef4444' }}>Sign out</Text>
-        </TouchableOpacity>
       </View>
     </SafeAreaView>
   )

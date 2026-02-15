@@ -5,14 +5,11 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { LinearGradient } from 'expo-linear-gradient'
 import {
   Home, Sun, Circle, Menu, Camera, X,
-  Heart, User, PieChart, Settings, LogOut,
+  Heart, User, Settings,
 } from 'lucide-react-native'
-import { useAuth } from '@/lib/auth-context'
-
 const menuItems = [
   { label: 'Progress', icon: Heart, gradient: ['#34d399', '#14b8a6'] as const, route: '/progress' },
   { label: 'My Practitioner', icon: User, gradient: ['#fb7185', '#ec4899'] as const, route: '/practitioner' },
-  { label: 'Balance', icon: PieChart, gradient: ['#8b5cf6', '#7c3aed'] as const, route: '/balance' },
   { label: 'Settings', icon: Settings, gradient: ['#9ca3af', '#6b7280'] as const, route: '/settings' },
 ]
 
@@ -74,22 +71,8 @@ export default function TabLayout() {
   const [showMenu, setShowMenu] = useState(false)
   const router = useRouter()
   const segments = useSegments()
-  const { signOut } = useAuth()
-
   // Hide tab bar on Moments screen (per-screen tabBarStyle is unreliable in production)
   const hideTabBar = segments[segments.length - 1] === 'moments'
-
-  function handleSignOut() {
-    setShowMenu(false)
-    if (Platform.OS === 'web') {
-      if (confirm('Are you sure you want to sign out?')) signOut()
-    } else {
-      Alert.alert('Sign out', 'Are you sure?', [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Sign out', style: 'destructive', onPress: signOut },
-      ])
-    }
-  }
 
   return (
     <View style={{ flex: 1 }}>
@@ -245,31 +228,6 @@ export default function TabLayout() {
               </TouchableOpacity>
             ))}
 
-            {/* Divider + Sign out */}
-            <View style={{ height: 1, backgroundColor: '#f3f4f6', marginVertical: 4, marginHorizontal: 12 }} />
-            <TouchableOpacity
-              onPress={handleSignOut}
-              activeOpacity={0.7}
-              style={{
-                flexDirection: 'row',
-                alignItems: 'center',
-                gap: 12,
-                paddingVertical: 10,
-                paddingHorizontal: 12,
-                borderRadius: 14,
-              }}
-            >
-              <View style={{
-                width: 36, height: 36, borderRadius: 12,
-                backgroundColor: '#fef2f2',
-                alignItems: 'center', justifyContent: 'center',
-              }}>
-                <LogOut size={18} color="#ef4444" />
-              </View>
-              <Text style={{ fontSize: 15, fontWeight: '500', color: '#ef4444' }}>
-                Sign out
-              </Text>
-            </TouchableOpacity>
           </View>
         </Pressable>
       </Modal>
