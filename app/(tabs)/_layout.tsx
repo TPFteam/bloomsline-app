@@ -13,7 +13,6 @@ const menuItems = [
   { label: 'Progress', icon: Heart, gradient: ['#34d399', '#14b8a6'] as const, route: '/progress' },
   { label: 'My Practitioner', icon: User, gradient: ['#fb7185', '#ec4899'] as const, route: '/practitioner' },
   { label: 'Balance', icon: PieChart, gradient: ['#8b5cf6', '#7c3aed'] as const, route: '/balance' },
-  { label: 'Reflect', icon: Heart, gradient: ['#2dd4bf', '#10b981'] as const, route: '/reflect' },
   { label: 'Settings', icon: Settings, gradient: ['#9ca3af', '#6b7280'] as const, route: '/settings' },
 ]
 

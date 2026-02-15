@@ -1225,6 +1225,47 @@ export default function HomeScreen() {
               )
             })()}
 
+            {/* A Moment to Pause — reflect entry point */}
+            <TouchableOpacity
+              onPress={() => router.push('/reflect')}
+              activeOpacity={0.85}
+              style={{ marginTop: 28, borderRadius: 20, overflow: 'hidden' }}
+            >
+              <LinearGradient
+                colors={['#fdf2f8', '#fce7f3', '#f5f3ff']}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={{
+                  padding: 24,
+                  borderRadius: 20,
+                  borderWidth: 1,
+                  borderColor: 'rgba(236,72,153,0.08)',
+                }}
+              >
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+                  <View style={{
+                    width: 36, height: 36, borderRadius: 18,
+                    backgroundColor: 'rgba(244,63,94,0.1)',
+                    alignItems: 'center', justifyContent: 'center',
+                  }}>
+                    <Heart size={18} color="#f43f5e" />
+                  </View>
+                  <Text style={{ fontSize: 17, fontWeight: '600', color: '#831843' }}>
+                    A moment to pause
+                  </Text>
+                </View>
+                <Text style={{ fontSize: 14, color: '#9d174d', lineHeight: 20, opacity: 0.8 }}>
+                  Take a breath. Check in with yourself — how are you really feeling today?
+                </Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 14 }}>
+                  <Text style={{ fontSize: 13, fontWeight: '600', color: '#ec4899' }}>
+                    Reflect now
+                  </Text>
+                  <ChevronRight size={14} color="#ec4899" />
+                </View>
+              </LinearGradient>
+            </TouchableOpacity>
+
           </View>
         </ScrollView>
       </SafeAreaView>
