@@ -10,6 +10,9 @@ import {
   Dimensions,
   Modal,
   Pressable,
+  Animated,
+  Easing,
+  TextInput,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { LinearGradient } from 'expo-linear-gradient'
@@ -103,10 +106,51 @@ const ANCHOR_ICONS: Record<string, any> = {
   bed: Bed, apple: Apple, meditation: Circle, walk: Footprints,
   social: Users, heart: Heart, sprout: Sparkles, journal: PenLine,
   gratitude: Sparkles, nature: TreePine, creativity: Palette,
-  breathing: Wind, stretch: Sparkles, vegetables: Sparkles, music: Music,
+  breathing: Wind, stretch: StretchHorizontal, vegetables: Sparkles, music: Music,
   cigarette: Cigarette, wine: Wine, coffee: Coffee, cookie: Cookie,
   smartphone: Smartphone, tv: Tv, candy: Candy, junkfood: Pizza,
 }
+
+// Predefined anchor options with labels
+const ANCHOR_OPTIONS: Record<string, { labelEn: string; labelFr: string }> = {
+  droplet: { labelEn: 'Water', labelFr: 'Eau' },
+  dumbbell: { labelEn: 'Exercise', labelFr: 'Exercice' },
+  book: { labelEn: 'Reading', labelFr: 'Lecture' },
+  brain: { labelEn: 'Learning', labelFr: 'Apprentissage' },
+  bed: { labelEn: 'Sleep', labelFr: 'Sommeil' },
+  apple: { labelEn: 'Healthy Eating', labelFr: 'Manger sain' },
+  meditation: { labelEn: 'Meditation', labelFr: 'Méditation' },
+  walk: { labelEn: 'Walking', labelFr: 'Marche' },
+  social: { labelEn: 'Social', labelFr: 'Social' },
+  heart: { labelEn: 'Self-care', labelFr: 'Bien-être' },
+  sprout: { labelEn: 'Growth', labelFr: 'Croissance' },
+  journal: { labelEn: 'Journaling', labelFr: 'Journal' },
+  gratitude: { labelEn: 'Gratitude', labelFr: 'Gratitude' },
+  nature: { labelEn: 'Nature', labelFr: 'Nature' },
+  creativity: { labelEn: 'Creativity', labelFr: 'Créativité' },
+  breathing: { labelEn: 'Breathing', labelFr: 'Respiration' },
+  stretch: { labelEn: 'Stretching', labelFr: 'Étirements' },
+  vegetables: { labelEn: 'Vegetables', labelFr: 'Légumes' },
+  music: { labelEn: 'Music', labelFr: 'Musique' },
+  cigarette: { labelEn: 'Smoking', labelFr: 'Tabac' },
+  wine: { labelEn: 'Alcohol', labelFr: 'Alcool' },
+  coffee: { labelEn: 'Caffeine', labelFr: 'Caféine' },
+  cookie: { labelEn: 'Snacking', labelFr: 'Grignotage' },
+  smartphone: { labelEn: 'Screen Time', labelFr: 'Écrans' },
+  tv: { labelEn: 'TV', labelFr: 'Télé' },
+  candy: { labelEn: 'Sugar', labelFr: 'Sucre' },
+  junkfood: { labelEn: 'Junk Food', labelFr: 'Malbouffe' },
+}
+
+const GROW_OPTIONS = [
+  'droplet', 'dumbbell', 'book', 'brain', 'bed', 'apple',
+  'meditation', 'walk', 'social', 'heart', 'sprout', 'journal',
+  'gratitude', 'nature', 'creativity', 'breathing', 'stretch', 'vegetables', 'music',
+]
+
+const LETGO_OPTIONS = [
+  'cigarette', 'wine', 'coffee', 'cookie', 'smartphone', 'tv', 'candy', 'junkfood',
+]
 
 type Anchor = {
   id: string
@@ -126,6 +170,32 @@ type MomentItem = {
   media_url: string | null
   thumbnail_url: string | null
   text_content: string | null
+}
+
+function RotatingRing() {
+  const spin = useRef(new Animated.Value(0)).current
+
+  useEffect(() => {
+    Animated.loop(
+      Animated.timing(spin, {
+        toValue: 1,
+        duration: 8000,
+        easing: Easing.linear,
+        useNativeDriver: true,
+      })
+    ).start()
+  }, [])
+
+  const rotate = spin.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '360deg'] })
+
+  return (
+    <Animated.View style={{
+      width: 48, height: 48, borderRadius: 24,
+      borderWidth: 2, borderStyle: 'dashed',
+      borderColor: 'rgba(255,255,255,0.4)',
+      transform: [{ rotate }],
+    }} />
+  )
 }
 
 function FullscreenVideoPlayer({ uri }: { uri: string }) {
@@ -245,6 +315,11 @@ export default function HomeScreen() {
   const [memberRituals, setMemberRituals] = useState<MemberRitual[]>([])
   const [ritualCompletions, setRitualCompletions] = useState<RitualCompletion[]>([])
   const [previewRitual, setPreviewRitual] = useState<{ ritual: MemberRitual; completion: RitualCompletion | null } | null>(null)
+  const [showAddAnchor, setShowAddAnchor] = useState(false)
+  const [anchorsTab, setAnchorsTab] = useState<'grow' | 'letgo'>('grow')
+  const [customAnchorMode, setCustomAnchorMode] = useState(false)
+  const [customAnchorLabel, setCustomAnchorLabel] = useState('')
+  const [customAnchorIcon, setCustomAnchorIcon] = useState<string | null>(null)
 
   const firstName = member?.first_name || user?.user_metadata?.full_name?.split(' ')[0] || 'Friend'
   const totalSeedLogs = Object.values(anchorLogs).reduce((sum, c) => sum + c, 0)
@@ -326,6 +401,77 @@ export default function HomeScreen() {
       logged_at: now.toISOString(),
       log_date: localDate,
     })
+  }
+
+  async function addAnchor(iconKey: string, type: 'grow' | 'letgo') {
+    if (!member?.id) return
+    const opt = ANCHOR_OPTIONS[iconKey]
+    if (!opt) return
+
+    const { data, error } = await supabase
+      .from('member_anchors')
+      .insert({
+        member_id: member.id,
+        icon: iconKey,
+        label_en: opt.labelEn,
+        label_fr: opt.labelFr,
+        type,
+      })
+      .select()
+      .single()
+
+    if (error) {
+      console.error('Error adding anchor:', error)
+      return
+    }
+
+    if (data) {
+      setAnchors(prev => [...prev, {
+        id: data.id,
+        icon: data.icon,
+        label_en: data.label_en,
+        label_fr: data.label_fr,
+        type: data.type as 'grow' | 'letgo',
+      }])
+    }
+
+    setShowAddAnchor(false)
+  }
+
+  async function addCustomAnchor() {
+    if (!member?.id || !customAnchorLabel.trim() || !customAnchorIcon) return
+
+    const { data, error } = await supabase
+      .from('member_anchors')
+      .insert({
+        member_id: member.id,
+        icon: customAnchorIcon,
+        label_en: customAnchorLabel.trim(),
+        label_fr: customAnchorLabel.trim(),
+        type: anchorsTab,
+      })
+      .select()
+      .single()
+
+    if (error) {
+      console.error('Error adding custom anchor:', error)
+      return
+    }
+
+    if (data) {
+      setAnchors(prev => [...prev, {
+        id: data.id,
+        icon: data.icon,
+        label_en: data.label_en,
+        label_fr: data.label_fr,
+        type: data.type as 'grow' | 'letgo',
+      }])
+    }
+
+    setShowAddAnchor(false)
+    setCustomAnchorMode(false)
+    setCustomAnchorLabel('')
+    setCustomAnchorIcon(null)
   }
 
   // Zoom helpers
@@ -478,12 +624,16 @@ export default function HomeScreen() {
                 >
                   <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, flex: 1 }}>
-                      <View style={{
-                        width: 44, height: 44, borderRadius: 22,
-                        backgroundColor: 'rgba(255,255,255,0.2)',
-                        alignItems: 'center', justifyContent: 'center',
-                      }}>
-                        <Heart size={22} color="#ffffff" fill="#ffffff" />
+                      <View style={{ width: 48, height: 48, alignItems: 'center', justifyContent: 'center' }}>
+                        <RotatingRing />
+                        <View style={{
+                          position: 'absolute',
+                          width: 34, height: 34, borderRadius: 17,
+                          backgroundColor: 'rgba(255,255,255,0.2)',
+                          alignItems: 'center', justifyContent: 'center',
+                        }}>
+                          <Heart size={16} color="#ffffff" fill="#ffffff" />
+                        </View>
                       </View>
                       <View style={{ flex: 1 }}>
                         <Text style={{ fontSize: 18, fontWeight: '700', color: '#ffffff' }}>Your Day</Text>
@@ -911,7 +1061,7 @@ export default function HomeScreen() {
                   </LinearGradient>
                   <Text style={{ fontSize: 16, fontWeight: '700', color: '#111827' }}>My Little Steps</Text>
                 </View>
-                <TouchableOpacity style={{ flexDirection: 'row', alignItems: 'center', gap: 2 }}>
+                <TouchableOpacity onPress={() => router.push('/seeds')} style={{ flexDirection: 'row', alignItems: 'center', gap: 2 }}>
                   <Text style={{ fontSize: 12, fontWeight: '600', color: '#d97706' }}>View all</Text>
                   <ChevronRight size={14} color="#d97706" />
                 </TouchableOpacity>
@@ -962,6 +1112,7 @@ export default function HomeScreen() {
 
                 {/* Add button */}
                 <TouchableOpacity
+                  onPress={() => setShowAddAnchor(true)}
                   activeOpacity={0.7}
                   style={{
                     width: '22.5%',
@@ -1330,6 +1481,240 @@ export default function HomeScreen() {
             </Pressable>
           )
         })()}
+      </Modal>
+
+      {/* ===== ADD ANCHOR MODAL ===== */}
+      <Modal
+        visible={showAddAnchor}
+        transparent
+        animationType="slide"
+        onRequestClose={() => {
+          setShowAddAnchor(false)
+          setCustomAnchorMode(false)
+          setCustomAnchorLabel('')
+          setCustomAnchorIcon(null)
+        }}
+      >
+        <Pressable
+          onPress={() => {
+            setShowAddAnchor(false)
+            setCustomAnchorMode(false)
+            setCustomAnchorLabel('')
+            setCustomAnchorIcon(null)
+          }}
+          style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'flex-end' }}
+        >
+          <Pressable
+            onPress={(e) => e.stopPropagation()}
+            style={{
+              backgroundColor: '#ffffff', borderTopLeftRadius: 24, borderTopRightRadius: 24,
+              paddingTop: 16, paddingBottom: 40, paddingHorizontal: 20,
+              maxHeight: '80%',
+            }}
+          >
+            {/* Handle bar */}
+            <View style={{ width: 40, height: 4, borderRadius: 2, backgroundColor: '#d1d5db', alignSelf: 'center', marginBottom: 16 }} />
+
+            {/* Title */}
+            <Text style={{ fontSize: 20, fontWeight: '700', color: '#111827', textAlign: 'center', marginBottom: 16 }}>
+              {customAnchorMode ? 'Create Your Own' : 'Add a Seed'}
+            </Text>
+
+            {/* Tabs */}
+            <View style={{
+              flexDirection: 'row', backgroundColor: '#f3f4f6', borderRadius: 12,
+              padding: 3, marginBottom: 16,
+            }}>
+              <TouchableOpacity
+                onPress={() => { setAnchorsTab('grow'); setCustomAnchorMode(false); setCustomAnchorLabel(''); setCustomAnchorIcon(null) }}
+                style={{
+                  flex: 1, paddingVertical: 10, borderRadius: 10, alignItems: 'center',
+                  backgroundColor: anchorsTab === 'grow' ? '#ffffff' : 'transparent',
+                }}
+              >
+                <Text style={{
+                  fontSize: 14, fontWeight: '600',
+                  color: anchorsTab === 'grow' ? '#059669' : '#6b7280',
+                }}>Grow</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={() => { setAnchorsTab('letgo'); setCustomAnchorMode(false); setCustomAnchorLabel(''); setCustomAnchorIcon(null) }}
+                style={{
+                  flex: 1, paddingVertical: 10, borderRadius: 10, alignItems: 'center',
+                  backgroundColor: anchorsTab === 'letgo' ? '#ffffff' : 'transparent',
+                }}
+              >
+                <Text style={{
+                  fontSize: 14, fontWeight: '600',
+                  color: anchorsTab === 'letgo' ? '#d97706' : '#6b7280',
+                }}>Let Go</Text>
+              </TouchableOpacity>
+            </View>
+
+            {customAnchorMode ? (
+              /* ===== CUSTOM CREATION MODE ===== */
+              <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+                {/* Name input */}
+                <Text style={{ fontSize: 13, color: '#6b7280', marginBottom: 8 }}>Name:</Text>
+                <TextInput
+                  value={customAnchorLabel}
+                  onChangeText={setCustomAnchorLabel}
+                  placeholder={anchorsTab === 'grow' ? 'Ex: Journaling' : 'Ex: Junk food'}
+                  placeholderTextColor="#9ca3af"
+                  maxLength={30}
+                  autoFocus
+                  style={{
+                    backgroundColor: '#f9fafb', borderWidth: 1, borderColor: '#e5e7eb',
+                    borderRadius: 14, paddingHorizontal: 16, paddingVertical: 12,
+                    fontSize: 15, color: '#111827', marginBottom: 20,
+                  }}
+                />
+
+                {/* Icon picker */}
+                <Text style={{ fontSize: 13, color: '#6b7280', marginBottom: 10 }}>Choose an icon:</Text>
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 24 }}>
+                  {Object.entries(ANCHOR_ICONS).map(([key, IconComp]) => {
+                    const isSelected = customAnchorIcon === key
+                    const isGrow = anchorsTab === 'grow'
+                    return (
+                      <TouchableOpacity
+                        key={key}
+                        onPress={() => setCustomAnchorIcon(key)}
+                        activeOpacity={0.7}
+                        style={{
+                          width: 44, height: 44, borderRadius: 12,
+                          alignItems: 'center', justifyContent: 'center',
+                          backgroundColor: isSelected
+                            ? (isGrow ? '#059669' : '#d97706')
+                            : '#f3f4f6',
+                        }}
+                      >
+                        <IconComp size={20} color={isSelected ? '#ffffff' : '#6b7280'} />
+                      </TouchableOpacity>
+                    )
+                  })}
+                </View>
+
+                {/* Buttons */}
+                <View style={{ flexDirection: 'row', gap: 10 }}>
+                  <TouchableOpacity
+                    onPress={() => {
+                      setCustomAnchorMode(false)
+                      setCustomAnchorLabel('')
+                      setCustomAnchorIcon(null)
+                    }}
+                    style={{
+                      flex: 1, paddingVertical: 14, borderRadius: 14,
+                      borderWidth: 1, borderColor: '#e5e7eb', alignItems: 'center',
+                    }}
+                  >
+                    <Text style={{ fontSize: 15, fontWeight: '600', color: '#6b7280' }}>Back</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    onPress={addCustomAnchor}
+                    disabled={!customAnchorLabel.trim() || !customAnchorIcon}
+                    style={{
+                      flex: 1, paddingVertical: 14, borderRadius: 14, alignItems: 'center',
+                      backgroundColor: customAnchorLabel.trim() && customAnchorIcon
+                        ? (anchorsTab === 'grow' ? '#059669' : '#d97706')
+                        : '#d1d5db',
+                    }}
+                  >
+                    <Text style={{ fontSize: 15, fontWeight: '600', color: '#ffffff' }}>Add</Text>
+                  </TouchableOpacity>
+                </View>
+              </ScrollView>
+            ) : (
+              /* ===== PREDEFINED OPTIONS MODE ===== */
+              <>
+                <Text style={{ fontSize: 13, color: '#9ca3af', marginBottom: 12 }}>
+                  {anchorsTab === 'grow' ? 'What would you like to grow?' : 'What would you like to let go?'}
+                </Text>
+
+                <ScrollView showsVerticalScrollIndicator={false}>
+                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>
+                    {(anchorsTab === 'grow' ? GROW_OPTIONS : LETGO_OPTIONS).map((key) => {
+                      const IconComp = ANCHOR_ICONS[key] || Circle
+                      const opt = ANCHOR_OPTIONS[key]
+                      if (!opt) return null
+                      const alreadyAdded = anchors.some(a => a.icon === key)
+                      const isGrow = anchorsTab === 'grow'
+
+                      return (
+                        <TouchableOpacity
+                          key={key}
+                          onPress={() => !alreadyAdded && addAnchor(key, anchorsTab)}
+                          disabled={alreadyAdded}
+                          activeOpacity={0.7}
+                          style={{
+                            width: '22%',
+                            aspectRatio: 1,
+                            borderRadius: 16,
+                            backgroundColor: alreadyAdded
+                              ? '#f3f4f6'
+                              : isGrow ? '#ecfdf5' : '#fef3c7',
+                            borderWidth: 2,
+                            borderColor: alreadyAdded
+                              ? '#e5e7eb'
+                              : isGrow ? '#a7f3d0' : '#fde68a',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            opacity: alreadyAdded ? 0.5 : 1,
+                          }}
+                        >
+                          <IconComp
+                            size={22}
+                            color={alreadyAdded ? '#9ca3af' : isGrow ? '#059669' : '#d97706'}
+                            style={{ marginBottom: 3 }}
+                          />
+                          <Text
+                            style={{
+                              fontSize: 9, fontWeight: '500', textAlign: 'center',
+                              color: alreadyAdded ? '#9ca3af' : '#6b7280',
+                              paddingHorizontal: 2,
+                            }}
+                            numberOfLines={1}
+                          >
+                            {opt.labelEn}
+                          </Text>
+                          {alreadyAdded && (
+                            <View style={{
+                              position: 'absolute', top: -4, right: -4,
+                              width: 18, height: 18, borderRadius: 9,
+                              backgroundColor: '#d1d5db',
+                              alignItems: 'center', justifyContent: 'center',
+                            }}>
+                              <Check size={10} color="#ffffff" />
+                            </View>
+                          )}
+                        </TouchableOpacity>
+                      )
+                    })}
+
+                    {/* Create custom button */}
+                    <TouchableOpacity
+                      onPress={() => setCustomAnchorMode(true)}
+                      activeOpacity={0.7}
+                      style={{
+                        width: '22%',
+                        aspectRatio: 1,
+                        borderRadius: 16,
+                        borderWidth: 2,
+                        borderStyle: 'dashed',
+                        borderColor: anchorsTab === 'grow' ? '#a7f3d0' : '#fde68a',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                      }}
+                    >
+                      <Plus size={20} color={anchorsTab === 'grow' ? '#059669' : '#d97706'} style={{ marginBottom: 2 }} />
+                      <Text style={{ fontSize: 9, fontWeight: '500', color: '#6b7280' }}>Create</Text>
+                    </TouchableOpacity>
+                  </View>
+                </ScrollView>
+              </>
+            )}
+          </Pressable>
+        </Pressable>
       </Modal>
     </LinearGradient>
   )

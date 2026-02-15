@@ -47,6 +47,7 @@ function AuthGate() {
           animation: 'fade',
         }}
       />
+      <Stack.Screen name="seeds" />
     </Stack>
   )
 }
