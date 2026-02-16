@@ -1,9 +1,11 @@
-import { createContext, useContext, useEffect, useState } from 'react'
+import { createContext, useContext, useEffect, useState, useRef } from 'react'
 import { Platform } from 'react-native'
 import { Session, User } from '@supabase/supabase-js'
 import * as WebBrowser from 'expo-web-browser'
 import Constants from 'expo-constants'
 import { supabase } from './supabase'
+
+const API_URL = process.env.EXPO_PUBLIC_API_URL || 'https://www.bloomsline.com'
 
 function getRedirectUri(): string {
   if (Platform.OS === 'web') {
@@ -54,7 +56,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setSession(session)
       setUser(session?.user ?? null)
       if (session?.user) {
-        fetchMember(session.user.id)
+        fetchMember(session.user.id, session.access_token)
       } else {
         setLoading(false)
       }
@@ -65,9 +67,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setSession(session)
       setUser(session?.user ?? null)
       if (session?.user) {
-        fetchMember(session.user.id)
+        fetchMember(session.user.id, session.access_token)
       } else {
         setMember(null)
+        setupCalledRef.current = null
         setLoading(false)
       }
     })
@@ -75,13 +78,50 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return () => subscription.unsubscribe()
   }, [])
 
-  async function fetchMember(userId: string) {
+  // Track whether we've already called setup-member for this session
+  const setupCalledRef = useRef<string | null>(null)
+
+  async function fetchMember(userId: string, accessToken?: string) {
     const { data } = await supabase
       .from('members')
       .select('*')
       .eq('user_id', userId)
       .single()
-    setMember(data)
+
+    if (data) {
+      setMember(data)
+      setLoading(false)
+      return
+    }
+
+    // No member record found — call setup-member API (handles new signups)
+    if (accessToken && setupCalledRef.current !== userId) {
+      setupCalledRef.current = userId
+      try {
+        const res = await fetch(`${API_URL}/api/auth/setup-member`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${accessToken}`,
+          },
+        })
+        const result = await res.json()
+
+        if (result.ok) {
+          // Re-fetch member after setup
+          const { data: newMember } = await supabase
+            .from('members')
+            .select('*')
+            .eq('user_id', userId)
+            .single()
+          setMember(newMember)
+        }
+        // If not eligible, member stays null — app will show appropriate state
+      } catch (err) {
+        console.error('setup-member failed:', err)
+      }
+    }
+
     setLoading(false)
   }
 
