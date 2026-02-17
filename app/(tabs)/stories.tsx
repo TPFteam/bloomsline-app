@@ -10,9 +10,10 @@ import {
   TextInput,
   Alert,
   Platform,
+  Share,
 } from 'react-native'
+import * as Clipboard from 'expo-clipboard'
 import { SafeAreaView } from 'react-native-safe-area-context'
-import { LinearGradient } from 'expo-linear-gradient'
 import {
   ArrowLeft,
   Plus,
@@ -31,9 +32,14 @@ import {
   Clock,
   Globe,
   Lock,
+  Copy,
+  Share2,
+  ArrowRight,
 } from 'lucide-react-native'
 import { useAuth } from '@/lib/auth-context'
 import { supabase } from '@/lib/supabase'
+
+const SHARE_BASE_URL = 'https://app.bloomsline.care/stories'
 
 // ============================================
 // TYPES
@@ -78,9 +84,20 @@ function formatDate(dateStr: string): string {
   return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
 }
 
-function getPreview(blocks: ContentBlock[]): string {
-  if (!Array.isArray(blocks)) return ''
-  for (const b of blocks) {
+function parseContent(raw: any): ContentBlock[] {
+  if (Array.isArray(raw)) return raw
+  if (typeof raw === 'string') {
+    try {
+      const parsed = JSON.parse(raw)
+      if (Array.isArray(parsed)) return parsed
+    } catch {}
+  }
+  return []
+}
+
+function getPreview(blocks: any): string {
+  const parsed = parseContent(blocks)
+  for (const b of parsed) {
     if (b.type === 'text' && b.content?.text) return b.content.text.substring(0, 120)
     if (b.type === 'heading' && b.content?.text) return b.content.text.substring(0, 120)
   }
@@ -272,6 +289,15 @@ export default function StoriesScreen() {
   // Action menu
   const [menuStoryId, setMenuStoryId] = useState<string | null>(null)
 
+  // Publish modal
+  const [publishModalVisible, setPublishModalVisible] = useState(false)
+  const [publishStep, setPublishStep] = useState<'choose' | 'enter-code'>('choose')
+  const [secretCode, setSecretCode] = useState('')
+  const [confirmCode, setConfirmCode] = useState('')
+  const [publishTarget, setPublishTarget] = useState<'editor' | 'story'>('editor') // where publish was triggered from
+  const [publishingStory, setPublishingStory] = useState<Story | null>(null) // for publishing from view modal
+  const [linkCopied, setLinkCopied] = useState(false)
+
   // ============================================
   // DATA
   // ============================================
@@ -286,7 +312,7 @@ export default function StoriesScreen() {
         .order('updated_at', { ascending: false })
 
       if (error) throw error
-      setStories((data || []) as Story[])
+      setStories((data || []).map((s: any) => ({ ...s, content: parseContent(s.content) })) as Story[])
     } catch (err) {
       console.error('Error fetching stories:', err)
     } finally {
@@ -325,7 +351,7 @@ export default function StoriesScreen() {
     setEditing(true)
   }
 
-  async function saveStory(publish?: boolean) {
+  async function saveStory(publish?: boolean, storySecretCode?: string | null) {
     if (!user?.id || !editTitle.trim()) {
       if (Platform.OS === 'web') alert('Please add a title.')
       else Alert.alert('Missing title', 'Please add a title for your story.')
@@ -344,6 +370,7 @@ export default function StoriesScreen() {
           updated_at: new Date().toISOString(),
         }
         if (publish !== undefined) updateData.published = publish
+        if (storySecretCode !== undefined) updateData.secret_code = storySecretCode
 
         const { error } = await supabase
           .from('stories')
@@ -354,15 +381,18 @@ export default function StoriesScreen() {
       } else {
         // Create new
         const slug = generateSlug(editTitle.trim(), user.id)
+        const insertData: any = {
+          user_id: user.id,
+          title: editTitle.trim(),
+          content: orderedBlocks,
+          published: publish || false,
+          unique_slug: slug,
+        }
+        if (storySecretCode) insertData.secret_code = storySecretCode
+
         const { error } = await supabase
           .from('stories')
-          .insert({
-            user_id: user.id,
-            title: editTitle.trim(),
-            content: orderedBlocks,
-            published: publish || false,
-            unique_slug: slug,
-          })
+          .insert(insertData)
 
         if (error) throw error
       }
@@ -378,18 +408,115 @@ export default function StoriesScreen() {
     }
   }
 
-  async function togglePublish(story: Story) {
+  // Publish a story directly (from view modal) — public or with secret code
+  async function publishStory(story: Story, storySecretCode?: string | null) {
+    try {
+      const updateData: any = {
+        published: true,
+        updated_at: new Date().toISOString(),
+      }
+      if (storySecretCode !== undefined) updateData.secret_code = storySecretCode
+
+      const { error } = await supabase
+        .from('stories')
+        .update(updateData)
+        .eq('id', story.id)
+
+      if (error) throw error
+      setStories(prev => prev.map(s => s.id === story.id
+        ? { ...s, published: true, secret_code: storySecretCode ?? s.secret_code }
+        : s
+      ))
+      if (viewingStory?.id === story.id) {
+        setViewingStory({ ...viewingStory, published: true, secret_code: storySecretCode ?? viewingStory.secret_code })
+      }
+    } catch (err) {
+      console.error('Error publishing story:', err)
+    }
+  }
+
+  async function unpublishStory(story: Story) {
     setMenuStoryId(null)
     try {
       const { error } = await supabase
         .from('stories')
-        .update({ published: !story.published, updated_at: new Date().toISOString() })
+        .update({ published: false, secret_code: null, updated_at: new Date().toISOString() })
         .eq('id', story.id)
 
       if (error) throw error
-      setStories(prev => prev.map(s => s.id === story.id ? { ...s, published: !s.published } : s))
+      setStories(prev => prev.map(s => s.id === story.id ? { ...s, published: false, secret_code: null } : s))
+      if (viewingStory?.id === story.id) {
+        setViewingStory({ ...viewingStory, published: false, secret_code: null })
+      }
     } catch (err) {
-      console.error('Error toggling publish:', err)
+      console.error('Error unpublishing story:', err)
+    }
+  }
+
+  // Publish modal helpers
+  function openPublishModal(target: 'editor' | 'story', story?: Story) {
+    setPublishStep('choose')
+    setSecretCode('')
+    setConfirmCode('')
+    setPublishTarget(target)
+    setPublishingStory(story || null)
+    setPublishModalVisible(true)
+  }
+
+  function closePublishModal() {
+    setPublishModalVisible(false)
+    setSecretCode('')
+    setConfirmCode('')
+  }
+
+  async function handlePublicPublish() {
+    closePublishModal()
+    if (publishTarget === 'editor') {
+      await saveStory(true, null)
+    } else if (publishingStory) {
+      await publishStory(publishingStory, null)
+    }
+  }
+
+  async function handlePrivatePublish() {
+    if (secretCode.trim().length < 4 || secretCode !== confirmCode) return
+    closePublishModal()
+    if (publishTarget === 'editor') {
+      await saveStory(true, secretCode.trim())
+    } else if (publishingStory) {
+      await publishStory(publishingStory, secretCode.trim())
+    }
+  }
+
+  function getShareUrl(story: Story): string {
+    return `${SHARE_BASE_URL}/${story.unique_slug}`
+  }
+
+  async function copyShareLink(story: Story) {
+    const url = getShareUrl(story)
+    if (Platform.OS === 'web') {
+      try { await navigator.clipboard.writeText(url) } catch {}
+    } else {
+      await Clipboard.setStringAsync(url)
+    }
+    setLinkCopied(true)
+    setTimeout(() => setLinkCopied(false), 2000)
+  }
+
+  async function shareStory(story: Story) {
+    const url = getShareUrl(story)
+    const message = story.secret_code
+      ? `Check out my story "${story.title}": ${url}\nSecret code: ${story.secret_code}`
+      : `Check out my story "${story.title}": ${url}`
+
+    if (Platform.OS === 'web') {
+      if (navigator.share) {
+        try { await navigator.share({ title: story.title, text: message, url }) } catch {}
+      } else {
+        await copyShareLink(story)
+      }
+    } else {
+      try { await Share.share({ message }) } catch {}
     }
   }
 
@@ -618,12 +745,25 @@ export default function StoriesScreen() {
                         <Text style={{ fontSize: 14, color: '#374151' }}>Edit</Text>
                       </TouchableOpacity>
                       <TouchableOpacity
-                        onPress={() => togglePublish(story)}
+                        onPress={() => {
+                          setMenuStoryId(null)
+                          if (story.published) { unpublishStory(story) }
+                          else { openPublishModal('story', story) }
+                        }}
                         style={{ flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 10, paddingHorizontal: 12, borderRadius: 10 }}
                       >
                         {story.published ? <EyeOff size={16} color="#374151" /> : <Eye size={16} color="#374151" />}
                         <Text style={{ fontSize: 14, color: '#374151' }}>{story.published ? 'Unpublish' : 'Publish'}</Text>
                       </TouchableOpacity>
+                      {story.published && (
+                        <TouchableOpacity
+                          onPress={() => { setMenuStoryId(null); shareStory(story) }}
+                          style={{ flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 10, paddingHorizontal: 12, borderRadius: 10 }}
+                        >
+                          <Share2 size={16} color="#374151" />
+                          <Text style={{ fontSize: 14, color: '#374151' }}>Share Link</Text>
+                        </TouchableOpacity>
+                      )}
                       <View style={{ height: 1, backgroundColor: '#f3f4f6', marginVertical: 2, marginHorizontal: 8 }} />
                       <TouchableOpacity
                         onPress={() => confirmDelete(story)}
@@ -689,36 +829,125 @@ export default function StoriesScreen() {
                     This story has no content yet.
                   </Text>
                 )}
+
+                {/* Share URL section for published stories */}
+                {viewingStory.published && (
+                  <View style={{
+                    marginTop: 20, backgroundColor: '#f0fdf4', borderRadius: 16, padding: 16,
+                    borderWidth: 1, borderColor: '#bbf7d0',
+                  }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+                      <Globe size={16} color="#059669" />
+                      <Text style={{ fontSize: 14, fontWeight: '700', color: '#059669' }}>
+                        {viewingStory.secret_code ? 'Private Link' : 'Public Link'}
+                      </Text>
+                      {viewingStory.secret_code && (
+                        <View style={{
+                          flexDirection: 'row', alignItems: 'center', gap: 4,
+                          backgroundColor: '#fef3c7', borderRadius: 8, paddingHorizontal: 8, paddingVertical: 3,
+                        }}>
+                          <Lock size={10} color="#92400e" />
+                          <Text style={{ fontSize: 10, fontWeight: '600', color: '#92400e' }}>Code Protected</Text>
+                        </View>
+                      )}
+                    </View>
+
+                    <View style={{
+                      flexDirection: 'row', alignItems: 'center', gap: 8,
+                      backgroundColor: '#fff', borderRadius: 10, padding: 10,
+                      borderWidth: 1, borderColor: '#e5e7eb',
+                    }}>
+                      <Text style={{ flex: 1, fontSize: 12, color: '#6b7280' }} numberOfLines={1}>
+                        {getShareUrl(viewingStory)}
+                      </Text>
+                      <TouchableOpacity
+                        onPress={() => copyShareLink(viewingStory)}
+                        style={{
+                          backgroundColor: linkCopied ? '#059669' : '#f3f4f6',
+                          borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6,
+                        }}
+                      >
+                        {linkCopied ? (
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                            <Check size={14} color="#fff" />
+                            <Text style={{ fontSize: 12, fontWeight: '600', color: '#fff' }}>Copied</Text>
+                          </View>
+                        ) : (
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                            <Copy size={14} color="#374151" />
+                            <Text style={{ fontSize: 12, fontWeight: '600', color: '#374151' }}>Copy</Text>
+                          </View>
+                        )}
+                      </TouchableOpacity>
+                    </View>
+
+                    {viewingStory.secret_code && (
+                      <View style={{ marginTop: 10, flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                        <Lock size={14} color="#92400e" />
+                        <Text style={{ fontSize: 13, color: '#92400e' }}>
+                          Secret code: <Text style={{ fontWeight: '700' }}>{viewingStory.secret_code}</Text>
+                        </Text>
+                      </View>
+                    )}
+                  </View>
+                )}
               </ScrollView>
 
               {/* Bottom actions */}
               <View style={{
                 padding: 16, paddingBottom: 32, borderTopWidth: 1, borderTopColor: '#f3f4f6',
-                flexDirection: 'row', gap: 12,
+                gap: 10,
               }}>
-                <TouchableOpacity
-                  onPress={() => { setViewingStory(null); startEdit(viewingStory) }}
-                  style={{
-                    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
-                    paddingVertical: 14, borderRadius: 14, backgroundColor: '#f3f4f6',
-                  }}
-                >
-                  <Edit3 size={18} color="#374151" />
-                  <Text style={{ fontSize: 15, fontWeight: '600', color: '#374151' }}>Edit</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  onPress={() => { togglePublish(viewingStory); setViewingStory(null) }}
-                  style={{
-                    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
-                    paddingVertical: 14, borderRadius: 14,
-                    backgroundColor: viewingStory.published ? '#f3f4f6' : '#f59e0b',
-                  }}
-                >
-                  {viewingStory.published ? <EyeOff size={18} color="#374151" /> : <Globe size={18} color="#fff" />}
-                  <Text style={{ fontSize: 15, fontWeight: '600', color: viewingStory.published ? '#374151' : '#fff' }}>
-                    {viewingStory.published ? 'Unpublish' : 'Publish'}
-                  </Text>
-                </TouchableOpacity>
+                {/* Row 1: Edit + Publish/Unpublish */}
+                <View style={{ flexDirection: 'row', gap: 12 }}>
+                  <TouchableOpacity
+                    onPress={() => { setViewingStory(null); startEdit(viewingStory) }}
+                    style={{
+                      flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+                      paddingVertical: 14, borderRadius: 14, backgroundColor: '#f3f4f6',
+                    }}
+                  >
+                    <Edit3 size={18} color="#374151" />
+                    <Text style={{ fontSize: 15, fontWeight: '600', color: '#374151' }}>Edit</Text>
+                  </TouchableOpacity>
+                  {viewingStory.published ? (
+                    <TouchableOpacity
+                      onPress={() => unpublishStory(viewingStory)}
+                      style={{
+                        flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+                        paddingVertical: 14, borderRadius: 14, backgroundColor: '#f3f4f6',
+                      }}
+                    >
+                      <EyeOff size={18} color="#374151" />
+                      <Text style={{ fontSize: 15, fontWeight: '600', color: '#374151' }}>Unpublish</Text>
+                    </TouchableOpacity>
+                  ) : (
+                    <TouchableOpacity
+                      onPress={() => openPublishModal('story', viewingStory)}
+                      style={{
+                        flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+                        paddingVertical: 14, borderRadius: 14, backgroundColor: '#f59e0b',
+                      }}
+                    >
+                      <Globe size={18} color="#fff" />
+                      <Text style={{ fontSize: 15, fontWeight: '600', color: '#fff' }}>Publish</Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
+                {/* Row 2: Share button (only for published) */}
+                {viewingStory.published && (
+                  <TouchableOpacity
+                    onPress={() => shareStory(viewingStory)}
+                    style={{
+                      flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+                      paddingVertical: 14, borderRadius: 14,
+                      backgroundColor: '#eff6ff', borderWidth: 1, borderColor: '#bfdbfe',
+                    }}
+                  >
+                    <Share2 size={18} color="#2563eb" />
+                    <Text style={{ fontSize: 15, fontWeight: '600', color: '#2563eb' }}>Share Story</Text>
+                  </TouchableOpacity>
+                )}
               </View>
             </>
           )}
@@ -770,7 +999,7 @@ export default function StoriesScreen() {
                 </Text>
               </TouchableOpacity>
               <TouchableOpacity
-                onPress={() => saveStory(true)}
+                onPress={() => openPublishModal('editor')}
                 disabled={editSaving}
                 style={{ paddingHorizontal: 12, paddingVertical: 8, borderRadius: 10, backgroundColor: '#f59e0b' }}
               >
@@ -850,6 +1079,174 @@ export default function StoriesScreen() {
             </View>
           </View>
         </SafeAreaView>
+      </Modal>
+
+      {/* ============================================ */}
+      {/* PUBLISH MODAL */}
+      {/* ============================================ */}
+      <Modal visible={publishModalVisible} animationType="fade" transparent onRequestClose={closePublishModal}>
+        <View style={{
+          flex: 1, backgroundColor: 'rgba(0,0,0,0.3)', justifyContent: 'center', alignItems: 'center', padding: 20,
+        }}>
+          <View style={{
+            backgroundColor: '#fff', borderRadius: 24, width: '100%', maxWidth: 420,
+            shadowColor: '#000', shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.15, shadowRadius: 24, elevation: 20,
+          }}>
+            {/* Header */}
+            <View style={{
+              flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+              padding: 20, borderBottomWidth: 1, borderBottomColor: '#f3f4f6',
+            }}>
+              <View>
+                <Text style={{ fontSize: 20, fontWeight: '800', color: '#171717' }}>Publish Your Story</Text>
+                <Text style={{ fontSize: 13, color: '#9ca3af', marginTop: 2 }}>
+                  {publishStep === 'choose' ? 'Choose how you want to share' : 'Create your secret code'}
+                </Text>
+              </View>
+              <TouchableOpacity onPress={closePublishModal} style={{ padding: 6 }}>
+                <X size={20} color="#9ca3af" />
+              </TouchableOpacity>
+            </View>
+
+            <View style={{ padding: 20 }}>
+              {publishStep === 'choose' ? (
+                <View style={{ gap: 12 }}>
+                  {/* Public option */}
+                  <TouchableOpacity
+                    onPress={handlePublicPublish}
+                    style={{
+                      flexDirection: 'row', alignItems: 'center', gap: 14, padding: 16,
+                      borderRadius: 16, borderWidth: 2, borderColor: '#e5e7eb', backgroundColor: '#fff',
+                    }}
+                    activeOpacity={0.7}
+                  >
+                    <View style={{
+                      width: 48, height: 48, borderRadius: 14, backgroundColor: '#ecfdf5',
+                      alignItems: 'center', justifyContent: 'center',
+                    }}>
+                      <Globe size={24} color="#059669" />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ fontSize: 16, fontWeight: '700', color: '#171717', marginBottom: 2 }}>Share Openly</Text>
+                      <Text style={{ fontSize: 12, color: '#6b7280', lineHeight: 17 }}>
+                        Anyone with the link can view your story.
+                      </Text>
+                    </View>
+                    <ArrowRight size={18} color="#d1d5db" />
+                  </TouchableOpacity>
+
+                  {/* Private option */}
+                  <TouchableOpacity
+                    onPress={() => setPublishStep('enter-code')}
+                    style={{
+                      flexDirection: 'row', alignItems: 'center', gap: 14, padding: 16,
+                      borderRadius: 16, borderWidth: 2, borderColor: '#e5e7eb', backgroundColor: '#fff',
+                    }}
+                    activeOpacity={0.7}
+                  >
+                    <View style={{
+                      width: 48, height: 48, borderRadius: 14, backgroundColor: '#f5f3ff',
+                      alignItems: 'center', justifyContent: 'center',
+                    }}>
+                      <Lock size={24} color="#7c3aed" />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ fontSize: 16, fontWeight: '700', color: '#171717', marginBottom: 2 }}>Keep It Private</Text>
+                      <Text style={{ fontSize: 12, color: '#6b7280', lineHeight: 17 }}>
+                        Only people with your secret code can view.
+                      </Text>
+                    </View>
+                    <ArrowRight size={18} color="#d1d5db" />
+                  </TouchableOpacity>
+                </View>
+              ) : (
+                <View style={{ gap: 16 }}>
+                  {/* Info banner */}
+                  <View style={{
+                    backgroundColor: '#f5f3ff', borderRadius: 14, padding: 14,
+                    flexDirection: 'row', gap: 10, borderWidth: 1, borderColor: '#e9d5ff',
+                  }}>
+                    <Lock size={18} color="#7c3aed" style={{ marginTop: 1 }} />
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ fontSize: 13, fontWeight: '600', color: '#6d28d9', marginBottom: 2 }}>
+                        Create a memorable code
+                      </Text>
+                      <Text style={{ fontSize: 12, color: '#7c3aed', lineHeight: 17 }}>
+                        You'll share this code with anyone you want to view your story.
+                      </Text>
+                    </View>
+                  </View>
+
+                  {/* Secret code input */}
+                  <View>
+                    <Text style={{ fontSize: 13, fontWeight: '600', color: '#374151', marginBottom: 6 }}>
+                      Secret Code <Text style={{ color: '#ef4444' }}>*</Text>
+                    </Text>
+                    <TextInput
+                      value={secretCode}
+                      onChangeText={setSecretCode}
+                      placeholder="Enter your secret code (min. 4 characters)"
+                      placeholderTextColor="#d1d5db"
+                      autoFocus
+                      style={{
+                        fontSize: 15, color: '#171717', padding: 14,
+                        backgroundColor: '#f9fafb', borderRadius: 12, borderWidth: 1, borderColor: '#e5e7eb',
+                      }}
+                    />
+                  </View>
+
+                  {/* Confirm code input */}
+                  <View>
+                    <Text style={{ fontSize: 13, fontWeight: '600', color: '#374151', marginBottom: 6 }}>
+                      Confirm Code <Text style={{ color: '#ef4444' }}>*</Text>
+                    </Text>
+                    <TextInput
+                      value={confirmCode}
+                      onChangeText={setConfirmCode}
+                      placeholder="Re-enter your secret code"
+                      placeholderTextColor="#d1d5db"
+                      style={{
+                        fontSize: 15, color: '#171717', padding: 14,
+                        backgroundColor: '#f9fafb', borderRadius: 12, borderWidth: 1, borderColor: '#e5e7eb',
+                      }}
+                    />
+                    {confirmCode.length > 0 && secretCode !== confirmCode && (
+                      <Text style={{ fontSize: 12, color: '#ef4444', marginTop: 4 }}>Codes don't match</Text>
+                    )}
+                  </View>
+
+                  {/* Action buttons */}
+                  <View style={{ flexDirection: 'row', gap: 10, marginTop: 4 }}>
+                    <TouchableOpacity
+                      onPress={() => { setPublishStep('choose'); setSecretCode(''); setConfirmCode('') }}
+                      style={{
+                        flex: 1, paddingVertical: 14, borderRadius: 14,
+                        backgroundColor: '#f3f4f6', alignItems: 'center',
+                      }}
+                    >
+                      <Text style={{ fontSize: 15, fontWeight: '600', color: '#374151' }}>Back</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      onPress={handlePrivatePublish}
+                      disabled={secretCode.trim().length < 4 || secretCode !== confirmCode}
+                      style={{
+                        flex: 1, paddingVertical: 14, borderRadius: 14, alignItems: 'center',
+                        backgroundColor: (secretCode.trim().length >= 4 && secretCode === confirmCode) ? '#7c3aed' : '#e5e7eb',
+                      }}
+                    >
+                      <Text style={{
+                        fontSize: 15, fontWeight: '600',
+                        color: (secretCode.trim().length >= 4 && secretCode === confirmCode) ? '#fff' : '#9ca3af',
+                      }}>
+                        Publish with Code
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              )}
+            </View>
+          </View>
+        </View>
       </Modal>
     </SafeAreaView>
   )
