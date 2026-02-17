@@ -41,7 +41,7 @@ export default function WeekView({
           const dateCounts = historyMap[anchor.id] || {}
           const weekTotal = anchorStats[anchor.id]?.weekTotal || 0
           return (
-            <View key={anchor.id} style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
+            <View key={anchor.id} style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 4 }}>
               <View style={{ flexDirection: 'row', alignItems: 'center', width: SCREEN_WIDTH * 0.28 }}>
                 <Icon size={14} color={accent} style={{ marginRight: 6 }} />
                 <Text numberOfLines={1} style={{ fontSize: 12, color: '#374151', flex: 1 }}>{anchor.label_en}</Text>
@@ -51,9 +51,9 @@ export default function WeekView({
                   const logged = (dateCounts[dayStr] || 0) > 0
                   const isToday = dayStr === today
                   return (
-                    <View key={i} style={{ flex: 1, alignItems: 'center' }}>
+                    <View key={i} style={{ flex: 1, alignItems: 'center', paddingVertical: 3 }}>
                       <View style={{
-                        width: 18, height: 18, borderRadius: 9,
+                        width: 16, height: 16, borderRadius: 8,
                         backgroundColor: logged ? fillColor : emptyColor,
                         ...(isToday && !logged ? { borderWidth: 1.5, borderColor: accent } : {}),
                       }} />
