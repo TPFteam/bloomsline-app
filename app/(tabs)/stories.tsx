@@ -11,7 +11,10 @@ import {
   Alert,
   Platform,
   Share,
+  Image,
 } from 'react-native'
+import { Audio } from 'expo-av'
+import * as ImagePicker from 'expo-image-picker'
 import * as Clipboard from 'expo-clipboard'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import {
@@ -35,6 +38,11 @@ import {
   Copy,
   Share2,
   ArrowRight,
+  ImageIcon,
+  Mic,
+  MicOff,
+  ChevronUp,
+  ChevronDown,
 } from 'lucide-react-native'
 import { useAuth } from '@/lib/auth-context'
 import { supabase } from '@/lib/supabase'
@@ -47,7 +55,7 @@ const SHARE_BASE_URL = 'https://app.bloomsline.care/stories'
 
 interface ContentBlock {
   id: string
-  type: 'text' | 'heading' | 'list' | 'divider'
+  type: 'text' | 'heading' | 'list' | 'divider' | 'media'
   content: any
   order: number
 }
@@ -108,6 +116,76 @@ function getPreview(blocks: any): string {
 // BLOCK RENDERER (view mode)
 // ============================================
 
+function AudioPlayer({ uri }: { uri: string }) {
+  const [sound, setSound] = useState<Audio.Sound | null>(null)
+  const [playing, setPlaying] = useState(false)
+  const [position, setPosition] = useState(0)
+  const [duration, setDuration] = useState(0)
+
+  useEffect(() => {
+    return () => { sound?.unloadAsync() }
+  }, [sound])
+
+  async function togglePlay() {
+    if (sound) {
+      if (playing) { await sound.pauseAsync(); setPlaying(false) }
+      else { await sound.playAsync(); setPlaying(true) }
+    } else {
+      const { sound: newSound } = await Audio.Sound.createAsync(
+        { uri },
+        { shouldPlay: true },
+        (status) => {
+          if (status.isLoaded) {
+            setPosition(status.positionMillis || 0)
+            setDuration(status.durationMillis || 0)
+            if (status.didJustFinish) { setPlaying(false); setPosition(0) }
+          }
+        }
+      )
+      setSound(newSound)
+      setPlaying(true)
+    }
+  }
+
+  function formatTime(ms: number) {
+    const s = Math.floor(ms / 1000)
+    const m = Math.floor(s / 60)
+    return `${m}:${(s % 60).toString().padStart(2, '0')}`
+  }
+
+  return (
+    <View style={{
+      backgroundColor: '#fffbeb', borderRadius: 14, padding: 14,
+      flexDirection: 'row', alignItems: 'center', gap: 12,
+      borderWidth: 1, borderColor: '#fde68a',
+    }}>
+      <TouchableOpacity
+        onPress={togglePlay}
+        style={{
+          width: 40, height: 40, borderRadius: 20, backgroundColor: '#f59e0b',
+          alignItems: 'center', justifyContent: 'center',
+        }}
+      >
+        <Text style={{ color: '#fff', fontSize: 16, fontWeight: '700' }}>
+          {playing ? '❚❚' : '▶'}
+        </Text>
+      </TouchableOpacity>
+      <View style={{ flex: 1 }}>
+        <View style={{ height: 4, backgroundColor: '#fde68a', borderRadius: 2, overflow: 'hidden' }}>
+          <View style={{
+            height: 4, backgroundColor: '#f59e0b', borderRadius: 2,
+            width: duration > 0 ? `${(position / duration) * 100}%` : '0%',
+          }} />
+        </View>
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 4 }}>
+          <Text style={{ fontSize: 11, color: '#92400e' }}>{formatTime(position)}</Text>
+          <Text style={{ fontSize: 11, color: '#92400e' }}>{formatTime(duration)}</Text>
+        </View>
+      </View>
+    </View>
+  )
+}
+
 function RenderBlock({ block }: { block: ContentBlock }) {
   switch (block.type) {
     case 'heading':
@@ -140,6 +218,53 @@ function RenderBlock({ block }: { block: ContentBlock }) {
         </View>
       )
     }
+    case 'media': {
+      // Handle both old format (single url) and new format (items array)
+      const mediaItems = block.content?.items || (block.content?.url ? [{
+        url: block.content.url,
+        fileType: block.content.fileType,
+        fileName: block.content.fileName,
+        alt: block.content.alt,
+      }] : [])
+
+      if (mediaItems.length === 0) return null
+
+      return (
+        <View style={{ gap: 10 }}>
+          {mediaItems.map((item: any, i: number) => (
+            <View key={i}>
+              {item.fileType === 'image' && (
+                <Image
+                  source={{ uri: item.url }}
+                  style={{
+                    width: '100%', height: undefined,
+                    aspectRatio: 4 / 3, borderRadius: 14,
+                    backgroundColor: '#f3f4f6',
+                  }}
+                  resizeMode="cover"
+                />
+              )}
+              {item.fileType === 'audio' && (
+                <AudioPlayer uri={item.url} />
+              )}
+              {item.fileType === 'video' && (
+                <View style={{
+                  backgroundColor: '#f3f4f6', borderRadius: 14, padding: 20,
+                  alignItems: 'center', justifyContent: 'center',
+                }}>
+                  <Text style={{ fontSize: 13, color: '#6b7280' }}>Video playback not yet supported</Text>
+                </View>
+              )}
+            </View>
+          ))}
+          {block.content?.caption && (
+            <Text style={{ fontSize: 13, color: '#9ca3af', fontStyle: 'italic', textAlign: 'center' }}>
+              {block.content.caption}
+            </Text>
+          )}
+        </View>
+      )
+    }
     case 'divider':
       return <View style={{ height: 1, backgroundColor: '#e5e7eb', marginVertical: 4 }} />
     default:
@@ -151,14 +276,44 @@ function RenderBlock({ block }: { block: ContentBlock }) {
 // BLOCK EDITOR (edit mode)
 // ============================================
 
+function BlockActions({ onRemove, onMoveUp, onMoveDown, isFirst, isLast }: {
+  onRemove: () => void; onMoveUp?: () => void; onMoveDown?: () => void; isFirst?: boolean; isLast?: boolean
+}) {
+  return (
+    <View style={{ gap: 2, alignItems: 'center' }}>
+      {onMoveUp && !isFirst && (
+        <TouchableOpacity onPress={onMoveUp} style={{ padding: 4 }}>
+          <ChevronUp size={14} color="#9ca3af" />
+        </TouchableOpacity>
+      )}
+      <TouchableOpacity onPress={onRemove} style={{ padding: 4 }}>
+        <X size={14} color="#ef4444" />
+      </TouchableOpacity>
+      {onMoveDown && !isLast && (
+        <TouchableOpacity onPress={onMoveDown} style={{ padding: 4 }}>
+          <ChevronDown size={14} color="#9ca3af" />
+        </TouchableOpacity>
+      )}
+    </View>
+  )
+}
+
 function EditBlock({
   block,
   onChange,
   onRemove,
+  onMoveUp,
+  onMoveDown,
+  isFirst,
+  isLast,
 }: {
   block: ContentBlock
   onChange: (updated: ContentBlock) => void
   onRemove: () => void
+  onMoveUp: () => void
+  onMoveDown: () => void
+  isFirst: boolean
+  isLast: boolean
 }) {
   switch (block.type) {
     case 'heading':
@@ -176,9 +331,7 @@ function EditBlock({
               }}
             />
           </View>
-          <TouchableOpacity onPress={onRemove} style={{ padding: 8, marginTop: 4 }}>
-            <X size={16} color="#ef4444" />
-          </TouchableOpacity>
+          <BlockActions onRemove={onRemove} onMoveUp={onMoveUp} onMoveDown={onMoveDown} isFirst={isFirst} isLast={isLast} />
         </View>
       )
     case 'text':
@@ -198,9 +351,7 @@ function EditBlock({
               }}
             />
           </View>
-          <TouchableOpacity onPress={onRemove} style={{ padding: 8, marginTop: 4 }}>
-            <X size={16} color="#ef4444" />
-          </TouchableOpacity>
+          <BlockActions onRemove={onRemove} onMoveUp={onMoveUp} onMoveDown={onMoveDown} isFirst={isFirst} isLast={isLast} />
         </View>
       )
     case 'list': {
@@ -244,9 +395,42 @@ function EditBlock({
               <Text style={{ fontSize: 13, fontWeight: '600', color: '#14b8a6' }}>Add item</Text>
             </TouchableOpacity>
           </View>
-          <TouchableOpacity onPress={onRemove} style={{ padding: 8, marginTop: 4 }}>
-            <X size={16} color="#ef4444" />
-          </TouchableOpacity>
+          <BlockActions onRemove={onRemove} onMoveUp={onMoveUp} onMoveDown={onMoveDown} isFirst={isFirst} isLast={isLast} />
+        </View>
+      )
+    }
+    case 'media': {
+      const mediaItems = block.content?.items || []
+      return (
+        <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 8 }}>
+          <View style={{ flex: 1, gap: 8 }}>
+            {mediaItems.map((item: any, i: number) => (
+              <View key={i}>
+                {item.fileType === 'image' && (
+                  <Image
+                    source={{ uri: item.url }}
+                    style={{ width: '100%', height: undefined, aspectRatio: 4 / 3, borderRadius: 12, backgroundColor: '#f3f4f6' }}
+                    resizeMode="cover"
+                  />
+                )}
+                {item.fileType === 'audio' && (
+                  <AudioPlayer uri={item.url} />
+                )}
+              </View>
+            ))}
+            {/* Caption */}
+            <TextInput
+              value={block.content?.caption || ''}
+              onChangeText={(t) => onChange({ ...block, content: { ...block.content, caption: t } })}
+              placeholder="Add a caption..."
+              placeholderTextColor="#d1d5db"
+              style={{
+                fontSize: 13, color: '#6b7280', fontStyle: 'italic', padding: 8,
+                backgroundColor: '#f9fafb', borderRadius: 8, borderWidth: 1, borderColor: '#e5e7eb',
+              }}
+            />
+          </View>
+          <BlockActions onRemove={onRemove} onMoveUp={onMoveUp} onMoveDown={onMoveDown} isFirst={isFirst} isLast={isLast} />
         </View>
       )
     }
@@ -254,9 +438,7 @@ function EditBlock({
       return (
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
           <View style={{ flex: 1, height: 1, backgroundColor: '#d1d5db' }} />
-          <TouchableOpacity onPress={onRemove} style={{ padding: 4 }}>
-            <X size={14} color="#ef4444" />
-          </TouchableOpacity>
+          <BlockActions onRemove={onRemove} onMoveUp={onMoveUp} onMoveDown={onMoveDown} isFirst={isFirst} isLast={isLast} />
         </View>
       )
     default:
@@ -543,6 +725,11 @@ export default function StoriesScreen() {
     }
   }
 
+  // Recording state
+  const [recording, setRecording] = useState<Audio.Recording | null>(null)
+  const [recordingDuration, setRecordingDuration] = useState(0)
+  const [uploading, setUploading] = useState(false)
+
   // Block editing helpers
   function addBlock(type: ContentBlock['type']) {
     const newBlock: ContentBlock = {
@@ -551,10 +738,132 @@ export default function StoriesScreen() {
       content: type === 'text' ? { text: '' }
         : type === 'heading' ? { text: '', level: 2 }
         : type === 'list' ? { items: [''], ordered: false }
+        : type === 'media' ? { items: [] }
         : {},
       order: editBlocks.length,
     }
     setEditBlocks(prev => [...prev, newBlock])
+  }
+
+  function moveBlock(index: number, direction: 'up' | 'down') {
+    const newBlocks = [...editBlocks]
+    const targetIndex = direction === 'up' ? index - 1 : index + 1
+    if (targetIndex < 0 || targetIndex >= newBlocks.length) return
+    ;[newBlocks[index], newBlocks[targetIndex]] = [newBlocks[targetIndex], newBlocks[index]]
+    setEditBlocks(newBlocks)
+  }
+
+  async function uploadToStorage(uri: string, fileName: string, mimeType: string): Promise<string | null> {
+    if (!user?.id) return null
+    setUploading(true)
+    try {
+      const response = await fetch(uri)
+      const blob = await response.blob()
+      const path = `${user.id}/${Date.now()}-${fileName}`
+
+      const { error } = await supabase.storage
+        .from('story-media')
+        .upload(path, blob, { contentType: mimeType, upsert: false })
+
+      if (error) throw error
+
+      const { data: urlData } = supabase.storage
+        .from('story-media')
+        .getPublicUrl(path)
+
+      return urlData.publicUrl
+    } catch (err) {
+      console.error('Upload error:', err)
+      if (Platform.OS === 'web') alert('Failed to upload file.')
+      else Alert.alert('Upload Error', 'Failed to upload file.')
+      return null
+    } finally {
+      setUploading(false)
+    }
+  }
+
+  async function pickImage() {
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      quality: 0.8,
+      allowsMultipleSelection: false,
+    })
+
+    if (result.canceled || !result.assets?.[0]) return
+
+    const asset = result.assets[0]
+    const fileName = asset.fileName || `image-${Date.now()}.jpg`
+    const publicUrl = await uploadToStorage(asset.uri, fileName, asset.mimeType || 'image/jpeg')
+    if (!publicUrl) return
+
+    const mediaBlock: ContentBlock = {
+      id: genBlockId(),
+      type: 'media',
+      content: {
+        items: [{ url: publicUrl, fileType: 'image', fileName, alt: '' }],
+        caption: '',
+      },
+      order: editBlocks.length,
+    }
+    setEditBlocks(prev => [...prev, mediaBlock])
+  }
+
+  async function startRecording() {
+    try {
+      const permission = await Audio.requestPermissionsAsync()
+      if (!permission.granted) {
+        Alert.alert('Permission needed', 'Please allow microphone access to record voice notes.')
+        return
+      }
+
+      await Audio.setAudioModeAsync({ allowsRecordingIOS: true, playsInSilentModeIOS: true })
+
+      const { recording: rec } = await Audio.Recording.createAsync(
+        Audio.RecordingOptionsPresets.HIGH_QUALITY
+      )
+      setRecording(rec)
+      setRecordingDuration(0)
+
+      // Track duration
+      rec.setOnRecordingStatusUpdate((status) => {
+        if (status.isRecording) {
+          setRecordingDuration(status.durationMillis || 0)
+        }
+      })
+    } catch (err) {
+      console.error('Failed to start recording:', err)
+    }
+  }
+
+  async function stopRecording() {
+    if (!recording) return
+    try {
+      await recording.stopAndUnloadAsync()
+      await Audio.setAudioModeAsync({ allowsRecordingIOS: false })
+
+      const uri = recording.getURI()
+      setRecording(null)
+      setRecordingDuration(0)
+
+      if (!uri) return
+
+      const fileName = `voice-${Date.now()}.m4a`
+      const publicUrl = await uploadToStorage(uri, fileName, 'audio/m4a')
+      if (!publicUrl) return
+
+      const mediaBlock: ContentBlock = {
+        id: genBlockId(),
+        type: 'media',
+        content: {
+          items: [{ url: publicUrl, fileType: 'audio', fileName }],
+          caption: '',
+        },
+        order: editBlocks.length,
+      }
+      setEditBlocks(prev => [...prev, mediaBlock])
+    } catch (err) {
+      console.error('Failed to stop recording:', err)
+    }
   }
 
   // ============================================
@@ -1027,6 +1336,8 @@ export default function StoriesScreen() {
                 <EditBlock
                   key={block.id}
                   block={block}
+                  isFirst={i === 0}
+                  isLast={i === editBlocks.length - 1}
                   onChange={(updated) => {
                     const newBlocks = [...editBlocks]
                     newBlocks[i] = updated
@@ -1037,19 +1348,50 @@ export default function StoriesScreen() {
                       setEditBlocks(editBlocks.filter((_, idx) => idx !== i))
                     }
                   }}
+                  onMoveUp={() => moveBlock(i, 'up')}
+                  onMoveDown={() => moveBlock(i, 'down')}
                 />
               ))}
             </View>
+
+            {/* Uploading indicator */}
+            {uploading && (
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, padding: 12, backgroundColor: '#fef3c7', borderRadius: 12 }}>
+                <ActivityIndicator size="small" color="#f59e0b" />
+                <Text style={{ fontSize: 13, color: '#92400e' }}>Uploading...</Text>
+              </View>
+            )}
           </ScrollView>
 
           {/* Add block toolbar */}
           <View style={{
             position: 'absolute', bottom: 0, left: 0, right: 0,
-            padding: 16, paddingBottom: 36, backgroundColor: '#fff',
+            paddingHorizontal: 16, paddingTop: 12, paddingBottom: 36, backgroundColor: '#fff',
             borderTopWidth: 1, borderTopColor: '#f3f4f6',
             shadowColor: '#000', shadowOffset: { width: 0, height: -2 }, shadowOpacity: 0.04, shadowRadius: 6,
           }}>
-            <View style={{ flexDirection: 'row', justifyContent: 'center', gap: 12 }}>
+            {/* Recording indicator */}
+            {recording && (
+              <View style={{
+                flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10,
+                marginBottom: 10, padding: 10, backgroundColor: '#fef2f2', borderRadius: 12,
+              }}>
+                <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: '#ef4444' }} />
+                <Text style={{ fontSize: 13, fontWeight: '600', color: '#dc2626' }}>
+                  Recording {Math.floor(recordingDuration / 1000)}s
+                </Text>
+                <TouchableOpacity
+                  onPress={stopRecording}
+                  style={{
+                    paddingHorizontal: 14, paddingVertical: 6, backgroundColor: '#ef4444', borderRadius: 10,
+                  }}
+                >
+                  <Text style={{ fontSize: 13, fontWeight: '600', color: '#fff' }}>Stop</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
               <TouchableOpacity onPress={() => addBlock('text')} style={{
                 flexDirection: 'row', alignItems: 'center', gap: 6,
                 backgroundColor: '#f3f4f6', borderRadius: 12, paddingHorizontal: 14, paddingVertical: 10,
@@ -1071,12 +1413,32 @@ export default function StoriesScreen() {
                 <FileText size={16} color="#374151" />
                 <Text style={{ fontSize: 13, fontWeight: '500', color: '#374151' }}>List</Text>
               </TouchableOpacity>
+              <TouchableOpacity onPress={pickImage} disabled={uploading} style={{
+                flexDirection: 'row', alignItems: 'center', gap: 6,
+                backgroundColor: '#eff6ff', borderRadius: 12, paddingHorizontal: 14, paddingVertical: 10,
+              }}>
+                <ImageIcon size={16} color="#2563eb" />
+                <Text style={{ fontSize: 13, fontWeight: '500', color: '#2563eb' }}>Image</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={recording ? stopRecording : startRecording}
+                disabled={uploading}
+                style={{
+                  flexDirection: 'row', alignItems: 'center', gap: 6,
+                  backgroundColor: recording ? '#fef2f2' : '#fdf2f8', borderRadius: 12, paddingHorizontal: 14, paddingVertical: 10,
+                }}
+              >
+                {recording ? <MicOff size={16} color="#dc2626" /> : <Mic size={16} color="#db2777" />}
+                <Text style={{ fontSize: 13, fontWeight: '500', color: recording ? '#dc2626' : '#db2777' }}>
+                  {recording ? 'Stop' : 'Voice'}
+                </Text>
+              </TouchableOpacity>
               <TouchableOpacity onPress={() => addBlock('divider')} style={{
                 backgroundColor: '#f3f4f6', borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10,
               }}>
                 <Minus size={16} color="#374151" />
               </TouchableOpacity>
-            </View>
+            </ScrollView>
           </View>
         </SafeAreaView>
       </Modal>
