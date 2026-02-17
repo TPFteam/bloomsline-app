@@ -480,6 +480,13 @@ export default function StoriesScreen() {
   const [publishingStory, setPublishingStory] = useState<Story | null>(null) // for publishing from view modal
   const [linkCopied, setLinkCopied] = useState(false)
 
+  // Code modal
+  const [codeModalVisible, setCodeModalVisible] = useState(false)
+  const [codeModalStory, setCodeModalStory] = useState<Story | null>(null)
+  const [newCode, setNewCode] = useState('')
+  const [confirmNewCode, setConfirmNewCode] = useState('')
+  const [codeSaving, setCodeSaving] = useState(false)
+
   // ============================================
   // DATA
   // ============================================
@@ -699,6 +706,77 @@ export default function StoriesScreen() {
       }
     } else {
       try { await Share.share({ message }) } catch {}
+    }
+  }
+
+  function openCodeModal(story: Story) {
+    setCodeModalStory(story)
+    setNewCode(story.secret_code || '')
+    setConfirmNewCode(story.secret_code || '')
+    setCodeModalVisible(true)
+  }
+
+  async function saveCode() {
+    if (!codeModalStory) return
+    const trimmed = newCode.trim()
+
+    // Validate if setting a code
+    if (trimmed && trimmed.length < 4) {
+      Alert.alert('Too short', 'Secret code must be at least 4 characters.')
+      return
+    }
+    if (trimmed && trimmed !== confirmNewCode.trim()) {
+      Alert.alert('Mismatch', 'Codes don\'t match.')
+      return
+    }
+
+    setCodeSaving(true)
+    try {
+      const codeValue = trimmed || null
+      const { error } = await supabase
+        .from('stories')
+        .update({ secret_code: codeValue, updated_at: new Date().toISOString() })
+        .eq('id', codeModalStory.id)
+
+      if (error) throw error
+
+      setStories(prev => prev.map(s =>
+        s.id === codeModalStory.id ? { ...s, secret_code: codeValue } : s
+      ))
+      if (viewingStory?.id === codeModalStory.id) {
+        setViewingStory({ ...viewingStory, secret_code: codeValue })
+      }
+      setCodeModalVisible(false)
+    } catch (err) {
+      console.error('Error saving code:', err)
+      Alert.alert('Error', 'Failed to update secret code.')
+    } finally {
+      setCodeSaving(false)
+    }
+  }
+
+  async function removeCode() {
+    if (!codeModalStory) return
+    setCodeSaving(true)
+    try {
+      const { error } = await supabase
+        .from('stories')
+        .update({ secret_code: null, updated_at: new Date().toISOString() })
+        .eq('id', codeModalStory.id)
+
+      if (error) throw error
+
+      setStories(prev => prev.map(s =>
+        s.id === codeModalStory.id ? { ...s, secret_code: null } : s
+      ))
+      if (viewingStory?.id === codeModalStory.id) {
+        setViewingStory({ ...viewingStory, secret_code: null })
+      }
+      setCodeModalVisible(false)
+    } catch (err) {
+      console.error('Error removing code:', err)
+    } finally {
+      setCodeSaving(false)
     }
   }
 
@@ -1038,51 +1116,7 @@ export default function StoriesScreen() {
                     </Text>
                   </View>
 
-                  {/* Action menu dropdown */}
-                  {menuStoryId === story.id && (
-                    <View style={{
-                      position: 'absolute', top: 40, right: 12, zIndex: 10,
-                      backgroundColor: '#fff', borderRadius: 14, padding: 6, minWidth: 160,
-                      shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.12, shadowRadius: 12, elevation: 10,
-                      borderWidth: 1, borderColor: '#f3f4f6',
-                    }}>
-                      <TouchableOpacity
-                        onPress={() => startEdit(story)}
-                        style={{ flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 10, paddingHorizontal: 12, borderRadius: 10 }}
-                      >
-                        <Edit3 size={16} color="#374151" />
-                        <Text style={{ fontSize: 14, color: '#374151' }}>Edit</Text>
-                      </TouchableOpacity>
-                      <TouchableOpacity
-                        onPress={() => {
-                          setMenuStoryId(null)
-                          if (story.published) { unpublishStory(story) }
-                          else { openPublishModal('story', story) }
-                        }}
-                        style={{ flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 10, paddingHorizontal: 12, borderRadius: 10 }}
-                      >
-                        {story.published ? <EyeOff size={16} color="#374151" /> : <Eye size={16} color="#374151" />}
-                        <Text style={{ fontSize: 14, color: '#374151' }}>{story.published ? 'Unpublish' : 'Publish'}</Text>
-                      </TouchableOpacity>
-                      {story.published && (
-                        <TouchableOpacity
-                          onPress={() => { setMenuStoryId(null); shareStory(story) }}
-                          style={{ flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 10, paddingHorizontal: 12, borderRadius: 10 }}
-                        >
-                          <Share2 size={16} color="#374151" />
-                          <Text style={{ fontSize: 14, color: '#374151' }}>Share Link</Text>
-                        </TouchableOpacity>
-                      )}
-                      <View style={{ height: 1, backgroundColor: '#f3f4f6', marginVertical: 2, marginHorizontal: 8 }} />
-                      <TouchableOpacity
-                        onPress={() => confirmDelete(story)}
-                        style={{ flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 10, paddingHorizontal: 12, borderRadius: 10 }}
-                      >
-                        <Trash2 size={16} color="#ef4444" />
-                        <Text style={{ fontSize: 14, color: '#ef4444' }}>Delete</Text>
-                      </TouchableOpacity>
-                    </View>
-                  )}
+                  {/* Menu is rendered as a bottom sheet modal below */}
                 </TouchableOpacity>
               )
             })}
@@ -1444,6 +1478,97 @@ export default function StoriesScreen() {
       </Modal>
 
       {/* ============================================ */}
+      {/* ACTION MENU MODAL */}
+      {/* ============================================ */}
+      <Modal visible={!!menuStoryId} animationType="fade" transparent onRequestClose={() => setMenuStoryId(null)}>
+        <TouchableOpacity
+          activeOpacity={1}
+          onPress={() => setMenuStoryId(null)}
+          style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.3)', justifyContent: 'flex-end' }}
+        >
+          <TouchableOpacity activeOpacity={1} onPress={() => {}}>
+            <View style={{
+              backgroundColor: '#fff', borderTopLeftRadius: 24, borderTopRightRadius: 24,
+              paddingTop: 12, paddingBottom: 40, paddingHorizontal: 8,
+            }}>
+              {/* Handle bar */}
+              <View style={{ width: 36, height: 4, backgroundColor: '#e5e7eb', borderRadius: 2, alignSelf: 'center', marginBottom: 16 }} />
+
+              {(() => {
+                const story = stories.find(s => s.id === menuStoryId)
+                if (!story) return null
+                return (
+                  <>
+                    {/* Story title */}
+                    <Text style={{ fontSize: 15, fontWeight: '700', color: '#171717', paddingHorizontal: 16, marginBottom: 12 }} numberOfLines={1}>
+                      {story.title}
+                    </Text>
+
+                    <TouchableOpacity
+                      onPress={() => { setMenuStoryId(null); startEdit(story) }}
+                      style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 14, paddingHorizontal: 16, borderRadius: 12 }}
+                    >
+                      <Edit3 size={20} color="#374151" />
+                      <Text style={{ fontSize: 16, color: '#374151' }}>Edit</Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                      onPress={() => {
+                        setMenuStoryId(null)
+                        if (story.published) { unpublishStory(story) }
+                        else { openPublishModal('story', story) }
+                      }}
+                      style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 14, paddingHorizontal: 16, borderRadius: 12 }}
+                    >
+                      {story.published ? <EyeOff size={20} color="#374151" /> : <Eye size={20} color="#374151" />}
+                      <Text style={{ fontSize: 16, color: '#374151' }}>{story.published ? 'Unpublish' : 'Publish'}</Text>
+                    </TouchableOpacity>
+
+                    {story.published && (
+                      <TouchableOpacity
+                        onPress={() => { setMenuStoryId(null); shareStory(story) }}
+                        style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 14, paddingHorizontal: 16, borderRadius: 12 }}
+                      >
+                        <Share2 size={20} color="#374151" />
+                        <Text style={{ fontSize: 16, color: '#374151' }}>Share Link</Text>
+                      </TouchableOpacity>
+                    )}
+
+                    {story.published && (
+                      <TouchableOpacity
+                        onPress={() => { setMenuStoryId(null); openCodeModal(story) }}
+                        style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 14, paddingHorizontal: 16, borderRadius: 12 }}
+                      >
+                        <Lock size={20} color="#7c3aed" />
+                        <View style={{ flex: 1 }}>
+                          <Text style={{ fontSize: 16, color: '#374151' }}>Secret Code</Text>
+                          {story.secret_code ? (
+                            <Text style={{ fontSize: 12, color: '#7c3aed', marginTop: 1 }}>Current: {story.secret_code}</Text>
+                          ) : (
+                            <Text style={{ fontSize: 12, color: '#9ca3af', marginTop: 1 }}>Not set — public access</Text>
+                          )}
+                        </View>
+                      </TouchableOpacity>
+                    )}
+
+                    <View style={{ height: 1, backgroundColor: '#f3f4f6', marginVertical: 4, marginHorizontal: 12 }} />
+
+                    <TouchableOpacity
+                      onPress={() => { setMenuStoryId(null); confirmDelete(story) }}
+                      style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 14, paddingHorizontal: 16, borderRadius: 12 }}
+                    >
+                      <Trash2 size={20} color="#ef4444" />
+                      <Text style={{ fontSize: 16, color: '#ef4444' }}>Delete</Text>
+                    </TouchableOpacity>
+                  </>
+                )
+              })()}
+            </View>
+          </TouchableOpacity>
+        </TouchableOpacity>
+      </Modal>
+
+      {/* ============================================ */}
       {/* PUBLISH MODAL */}
       {/* ============================================ */}
       <Modal visible={publishModalVisible} animationType="fade" transparent onRequestClose={closePublishModal}>
@@ -1606,6 +1731,122 @@ export default function StoriesScreen() {
                   </View>
                 </View>
               )}
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* ============================================ */}
+      {/* SECRET CODE MODAL */}
+      {/* ============================================ */}
+      <Modal visible={codeModalVisible} animationType="fade" transparent onRequestClose={() => setCodeModalVisible(false)}>
+        <View style={{
+          flex: 1, backgroundColor: 'rgba(0,0,0,0.3)', justifyContent: 'center', alignItems: 'center', padding: 20,
+        }}>
+          <View style={{
+            backgroundColor: '#fff', borderRadius: 24, width: '100%', maxWidth: 400,
+            shadowColor: '#000', shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.15, shadowRadius: 24, elevation: 20,
+          }}>
+            {/* Header */}
+            <View style={{
+              flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+              padding: 20, borderBottomWidth: 1, borderBottomColor: '#f3f4f6',
+            }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                <View style={{
+                  width: 36, height: 36, borderRadius: 10, backgroundColor: '#f5f3ff',
+                  alignItems: 'center', justifyContent: 'center',
+                }}>
+                  <Lock size={18} color="#7c3aed" />
+                </View>
+                <Text style={{ fontSize: 18, fontWeight: '800', color: '#171717' }}>Secret Code</Text>
+              </View>
+              <TouchableOpacity onPress={() => setCodeModalVisible(false)} style={{ padding: 6 }}>
+                <X size={20} color="#9ca3af" />
+              </TouchableOpacity>
+            </View>
+
+            <View style={{ padding: 20, gap: 16 }}>
+              {/* Current code display */}
+              {codeModalStory?.secret_code && (
+                <View style={{
+                  backgroundColor: '#f5f3ff', borderRadius: 12, padding: 12,
+                  flexDirection: 'row', alignItems: 'center', gap: 10,
+                  borderWidth: 1, borderColor: '#e9d5ff',
+                }}>
+                  <Lock size={16} color="#7c3aed" />
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ fontSize: 11, color: '#7c3aed', fontWeight: '600' }}>Current Code</Text>
+                    <Text style={{ fontSize: 16, fontWeight: '700', color: '#6d28d9', marginTop: 2 }}>
+                      {codeModalStory.secret_code}
+                    </Text>
+                  </View>
+                </View>
+              )}
+
+              {/* New code input */}
+              <View>
+                <Text style={{ fontSize: 13, fontWeight: '600', color: '#374151', marginBottom: 6 }}>
+                  {codeModalStory?.secret_code ? 'New Code' : 'Secret Code'} <Text style={{ color: '#9ca3af', fontWeight: '400' }}>(min. 4 characters)</Text>
+                </Text>
+                <TextInput
+                  value={newCode}
+                  onChangeText={setNewCode}
+                  placeholder="Enter a secret code"
+                  placeholderTextColor="#d1d5db"
+                  style={{
+                    fontSize: 15, color: '#171717', padding: 14,
+                    backgroundColor: '#f9fafb', borderRadius: 12, borderWidth: 1, borderColor: '#e5e7eb',
+                  }}
+                />
+              </View>
+
+              {/* Confirm code */}
+              <View>
+                <Text style={{ fontSize: 13, fontWeight: '600', color: '#374151', marginBottom: 6 }}>Confirm Code</Text>
+                <TextInput
+                  value={confirmNewCode}
+                  onChangeText={setConfirmNewCode}
+                  placeholder="Re-enter the code"
+                  placeholderTextColor="#d1d5db"
+                  style={{
+                    fontSize: 15, color: '#171717', padding: 14,
+                    backgroundColor: '#f9fafb', borderRadius: 12, borderWidth: 1, borderColor: '#e5e7eb',
+                  }}
+                />
+                {confirmNewCode.length > 0 && newCode !== confirmNewCode && (
+                  <Text style={{ fontSize: 12, color: '#ef4444', marginTop: 4 }}>Codes don't match</Text>
+                )}
+              </View>
+
+              {/* Actions */}
+              <View style={{ gap: 8, marginTop: 4 }}>
+                <TouchableOpacity
+                  onPress={saveCode}
+                  disabled={codeSaving || (newCode.trim().length > 0 && (newCode.trim().length < 4 || newCode !== confirmNewCode))}
+                  style={{
+                    paddingVertical: 14, borderRadius: 14, alignItems: 'center',
+                    backgroundColor: (newCode.trim().length >= 4 && newCode === confirmNewCode) ? '#7c3aed' : '#e5e7eb',
+                  }}
+                >
+                  <Text style={{
+                    fontSize: 15, fontWeight: '600',
+                    color: (newCode.trim().length >= 4 && newCode === confirmNewCode) ? '#fff' : '#9ca3af',
+                  }}>
+                    {codeSaving ? 'Saving...' : newCode.trim() ? 'Save Code' : 'Make Public (Remove Code)'}
+                  </Text>
+                </TouchableOpacity>
+
+                {codeModalStory?.secret_code && (
+                  <TouchableOpacity
+                    onPress={removeCode}
+                    disabled={codeSaving}
+                    style={{ paddingVertical: 12, borderRadius: 14, alignItems: 'center' }}
+                  >
+                    <Text style={{ fontSize: 14, fontWeight: '600', color: '#ef4444' }}>Remove Code (Make Public)</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
             </View>
           </View>
         </View>
