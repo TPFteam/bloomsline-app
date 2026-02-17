@@ -47,7 +47,7 @@ import {
 import { useAuth } from '@/lib/auth-context'
 import { supabase } from '@/lib/supabase'
 
-const SHARE_BASE_URL = 'https://app.bloomsline.care/stories'
+const SHARE_BASE_URL = 'https://bloomsline.com/stories'
 
 // ============================================
 // TYPES
