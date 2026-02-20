@@ -12,6 +12,7 @@ import {
   Alert,
   Platform,
   Image,
+  Share,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { LinearGradient } from 'expo-linear-gradient'
@@ -36,6 +37,10 @@ import {
   Plus,
   Globe,
   Lock,
+  Send,
+  Link2,
+  Share2,
+  Heart,
 } from 'lucide-react-native'
 import * as Clipboard from 'expo-clipboard'
 import { useRouter } from 'expo-router'
@@ -1341,7 +1346,7 @@ export default function PractitionerScreen() {
           onPress={() => { if (practitioner) setQuickModal('practitioners') }}
           style={{
             backgroundColor: '#fff', borderRadius: 20, padding: 20, marginBottom: 24,
-            borderWidth: 1, borderColor: '#f3f4f6',
+            borderWidth: 1, borderColor: '#f3f4f6', overflow: 'hidden',
             shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.04, shadowRadius: 6, elevation: 2,
           }}
         >
@@ -1388,38 +1393,45 @@ export default function PractitionerScreen() {
               <ChevronRight size={20} color="#d1d5db" />
             </View>
           ) : (
-            <View style={{ alignItems: 'center', paddingVertical: 24 }}>
-              <View style={{
-                width: 64, height: 64, borderRadius: 32, backgroundColor: '#f3f4f6',
-                alignItems: 'center', justifyContent: 'center', marginBottom: 12,
-              }}>
-                <User size={32} color="#9ca3af" />
-              </View>
-              <Text style={{ fontSize: 16, fontWeight: '600', color: '#171717' }}>
-                No practitioner connected yet
-              </Text>
-              <Text style={{ fontSize: 13, color: '#9ca3af', marginTop: 4, textAlign: 'center', paddingHorizontal: 16 }}>
-                Invite your therapist to explore Bloomsline together
-              </Text>
-
-              {/* Email invite */}
-              <View style={{ width: '100%', marginTop: 20, paddingHorizontal: 4 }}>
-                <Text style={{ fontSize: 13, fontWeight: '500', color: '#374151', marginBottom: 6 }}>
-                  Practitioner&apos;s email
+            <View style={{ paddingVertical: 20 }}>
+              {/* Illustration */}
+              <View style={{ alignItems: 'center', marginBottom: 24 }}>
+                <LinearGradient
+                  colors={['#ecfdf5', '#f0fdf4']}
+                  style={{
+                    width: 72, height: 72, borderRadius: 36,
+                    alignItems: 'center', justifyContent: 'center', marginBottom: 14,
+                  }}
+                >
+                  <Heart size={32} color="#059669" />
+                </LinearGradient>
+                <Text style={{ fontSize: 18, fontWeight: '700', color: '#171717', textAlign: 'center' }}>
+                  Connect with your practitioner
                 </Text>
-                <View style={{ flexDirection: 'row', gap: 8 }}>
+                <Text style={{ fontSize: 14, color: '#6b7280', marginTop: 6, textAlign: 'center', lineHeight: 20 }}>
+                  Invite your therapist so you can share progress, resources, and sessions together.
+                </Text>
+              </View>
+
+              {/* Email invite — full-width input with send icon inside */}
+              <View style={{ marginBottom: 12 }}>
+                <View style={{
+                  flexDirection: 'row', alignItems: 'center',
+                  backgroundColor: '#f9fafb', borderRadius: 14,
+                  borderWidth: 1, borderColor: '#e5e7eb',
+                }}>
                   <TextInput
                     value={inviteEmail}
                     onChangeText={setInviteEmail}
-                    placeholder="therapist@example.com"
+                    placeholder="Enter practitioner's email"
                     placeholderTextColor="#9ca3af"
                     keyboardType="email-address"
                     autoCapitalize="none"
                     autoCorrect={false}
                     style={{
-                      flex: 1, backgroundColor: '#f9fafb', borderRadius: 12,
-                      borderWidth: 1, borderColor: '#e5e7eb', paddingHorizontal: 14,
-                      paddingVertical: Platform.OS === 'ios' ? 12 : 10, fontSize: 14, color: '#171717',
+                      flex: 1, paddingHorizontal: 16,
+                      paddingVertical: Platform.OS === 'ios' ? 14 : 12,
+                      fontSize: 15, color: '#171717',
                     }}
                   />
                   <TouchableOpacity
@@ -1451,55 +1463,65 @@ export default function PractitionerScreen() {
                     disabled={inviteSending || !inviteEmail.trim()}
                     activeOpacity={0.7}
                     style={{
-                      backgroundColor: inviteEmail.trim() ? '#059669' : '#d1d5db',
-                      borderRadius: 12, paddingHorizontal: 16,
+                      marginRight: 6, width: 40, height: 40, borderRadius: 12,
+                      backgroundColor: inviteEmail.trim() ? '#059669' : '#e5e7eb',
                       alignItems: 'center', justifyContent: 'center',
                     }}
                   >
                     {inviteSending ? (
                       <ActivityIndicator size="small" color="#fff" />
                     ) : (
-                      <Text style={{ fontSize: 14, fontWeight: '600', color: '#fff' }}>Send</Text>
+                      <Send size={18} color={inviteEmail.trim() ? '#fff' : '#9ca3af'} />
                     )}
                   </TouchableOpacity>
                 </View>
               </View>
 
-              {/* Divider */}
-              <View style={{ flexDirection: 'row', alignItems: 'center', width: '100%', marginVertical: 16, paddingHorizontal: 4 }}>
-                <View style={{ flex: 1, height: 1, backgroundColor: '#e5e7eb' }} />
-                <Text style={{ marginHorizontal: 12, fontSize: 12, color: '#9ca3af' }}>or</Text>
-                <View style={{ flex: 1, height: 1, backgroundColor: '#e5e7eb' }} />
-              </View>
+              {/* Action buttons row */}
+              <View style={{ flexDirection: 'row', gap: 10 }}>
+                <TouchableOpacity
+                  onPress={async () => {
+                    await Clipboard.setStringAsync('https://bloomsline.care/practitioner')
+                    setInviteCopied(true)
+                    setTimeout(() => setInviteCopied(false), 2000)
+                  }}
+                  activeOpacity={0.7}
+                  style={{
+                    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+                    paddingVertical: 12, borderRadius: 12,
+                    backgroundColor: inviteCopied ? '#ecfdf5' : '#f3f4f6',
+                  }}
+                >
+                  {inviteCopied ? (
+                    <>
+                      <Check size={16} color="#059669" />
+                      <Text style={{ fontSize: 13, fontWeight: '600', color: '#059669' }}>Copied!</Text>
+                    </>
+                  ) : (
+                    <>
+                      <Link2 size={16} color="#6b7280" />
+                      <Text style={{ fontSize: 13, fontWeight: '600', color: '#374151' }}>Copy link</Text>
+                    </>
+                  )}
+                </TouchableOpacity>
 
-              {/* Copy link */}
-              <TouchableOpacity
-                onPress={async () => {
-                  await Clipboard.setStringAsync('https://bloomsline.care/practitioner')
-                  setInviteCopied(true)
-                  Alert.alert('Copied!', 'Practitioner sign-up link copied to clipboard.')
-                  setTimeout(() => setInviteCopied(false), 2000)
-                }}
-                activeOpacity={0.7}
-                style={{
-                  flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
-                  width: '100%', paddingVertical: 12, borderRadius: 12,
-                  borderWidth: 1, borderColor: '#e5e7eb', backgroundColor: '#f9fafb',
-                  marginHorizontal: 4,
-                }}
-              >
-                {inviteCopied ? (
-                  <>
-                    <Check size={16} color="#059669" />
-                    <Text style={{ fontSize: 14, fontWeight: '500', color: '#059669' }}>Copied!</Text>
-                  </>
-                ) : (
-                  <>
-                    <Plus size={16} color="#6b7280" />
-                    <Text style={{ fontSize: 14, fontWeight: '500', color: '#374151' }}>Copy practitioner sign-up link</Text>
-                  </>
-                )}
-              </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={() => {
+                    Share.share({
+                      message: 'Join me on Bloomsline Care! Sign up as a practitioner: https://bloomsline.care/practitioner',
+                    })
+                  }}
+                  activeOpacity={0.7}
+                  style={{
+                    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+                    paddingVertical: 12, borderRadius: 12,
+                    backgroundColor: '#f3f4f6',
+                  }}
+                >
+                  <Share2 size={16} color="#6b7280" />
+                  <Text style={{ fontSize: 13, fontWeight: '600', color: '#374151' }}>Share</Text>
+                </TouchableOpacity>
+              </View>
             </View>
           )}
         </TouchableOpacity>
