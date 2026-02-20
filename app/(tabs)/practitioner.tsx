@@ -34,10 +34,15 @@ import {
   BookOpen,
   ArrowLeft,
   Plus,
+  Globe,
+  Lock,
 } from 'lucide-react-native'
+import * as Clipboard from 'expo-clipboard'
 import { useRouter } from 'expo-router'
 import { useAuth } from '@/lib/auth-context'
 import { supabase } from '@/lib/supabase'
+
+const API_URL = process.env.EXPO_PUBLIC_API_URL || 'https://www.bloomsline.com'
 
 // ============================================
 // TYPES
@@ -787,6 +792,15 @@ export default function PractitionerScreen() {
   const [quickModal, setQuickModal] = useState<'practitioners' | 'assessments' | null>(null)
   const [assessmentFilter, setAssessmentFilter] = useState<'all' | 'pending' | 'completed'>('all')
 
+  // Invite practitioner
+  const [inviteEmail, setInviteEmail] = useState('')
+  const [inviteSending, setInviteSending] = useState(false)
+  const [inviteCopied, setInviteCopied] = useState(false)
+
+  // Member stories (always visible)
+  const [memberStories, setMemberStories] = useState<{ id: string; title: string; published: boolean; created_at: string }[]>([])
+
+
   // Reschedule modal
   const [rescheduleSessionId, setRescheduleSessionId] = useState<string | null>(null)
   const [rescheduleReason, setRescheduleReason] = useState('')
@@ -810,6 +824,15 @@ export default function PractitionerScreen() {
 
       // Fetch resources
       await fetchResources(member.id, member.practitioner_id)
+
+      // Fetch member's stories (always, regardless of practitioner)
+      const { data: storiesData } = await supabase
+        .from('stories')
+        .select('id, title, published, created_at')
+        .eq('user_id', member.user_id)
+        .order('created_at', { ascending: false })
+        .limit(5)
+      setMemberStories(storiesData || [])
     } catch (error) {
       console.error('Error loading practitioner data:', error)
     } finally {
@@ -1375,13 +1398,210 @@ export default function PractitionerScreen() {
               <Text style={{ fontSize: 16, fontWeight: '600', color: '#171717' }}>
                 No practitioner connected yet
               </Text>
-              <Text style={{ fontSize: 13, color: '#9ca3af', marginTop: 4, textAlign: 'center' }}>
-                When a practitioner invites you, they will appear here.
+              <Text style={{ fontSize: 13, color: '#9ca3af', marginTop: 4, textAlign: 'center', paddingHorizontal: 16 }}>
+                Invite your therapist to explore Bloomsline together
               </Text>
+
+              {/* Email invite */}
+              <View style={{ width: '100%', marginTop: 20, paddingHorizontal: 4 }}>
+                <Text style={{ fontSize: 13, fontWeight: '500', color: '#374151', marginBottom: 6 }}>
+                  Practitioner&apos;s email
+                </Text>
+                <View style={{ flexDirection: 'row', gap: 8 }}>
+                  <TextInput
+                    value={inviteEmail}
+                    onChangeText={setInviteEmail}
+                    placeholder="therapist@example.com"
+                    placeholderTextColor="#9ca3af"
+                    keyboardType="email-address"
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                    style={{
+                      flex: 1, backgroundColor: '#f9fafb', borderRadius: 12,
+                      borderWidth: 1, borderColor: '#e5e7eb', paddingHorizontal: 14,
+                      paddingVertical: Platform.OS === 'ios' ? 12 : 10, fontSize: 14, color: '#171717',
+                    }}
+                  />
+                  <TouchableOpacity
+                    onPress={async () => {
+                      if (!inviteEmail.trim()) return
+                      setInviteSending(true)
+                      try {
+                        const { data: { session } } = await supabase.auth.getSession()
+                        const res = await fetch(`${API_URL}/api/invite-practitioner`, {
+                          method: 'POST',
+                          headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${session?.access_token}`,
+                          },
+                          body: JSON.stringify({ email: inviteEmail.trim() }),
+                        })
+                        if (res.ok) {
+                          Alert.alert('Sent!', 'Invitation sent to your practitioner.')
+                          setInviteEmail('')
+                        } else {
+                          Alert.alert('Error', 'Failed to send invitation. Please try again.')
+                        }
+                      } catch {
+                        Alert.alert('Error', 'Something went wrong.')
+                      } finally {
+                        setInviteSending(false)
+                      }
+                    }}
+                    disabled={inviteSending || !inviteEmail.trim()}
+                    activeOpacity={0.7}
+                    style={{
+                      backgroundColor: inviteEmail.trim() ? '#059669' : '#d1d5db',
+                      borderRadius: 12, paddingHorizontal: 16,
+                      alignItems: 'center', justifyContent: 'center',
+                    }}
+                  >
+                    {inviteSending ? (
+                      <ActivityIndicator size="small" color="#fff" />
+                    ) : (
+                      <Text style={{ fontSize: 14, fontWeight: '600', color: '#fff' }}>Send</Text>
+                    )}
+                  </TouchableOpacity>
+                </View>
+              </View>
+
+              {/* Divider */}
+              <View style={{ flexDirection: 'row', alignItems: 'center', width: '100%', marginVertical: 16, paddingHorizontal: 4 }}>
+                <View style={{ flex: 1, height: 1, backgroundColor: '#e5e7eb' }} />
+                <Text style={{ marginHorizontal: 12, fontSize: 12, color: '#9ca3af' }}>or</Text>
+                <View style={{ flex: 1, height: 1, backgroundColor: '#e5e7eb' }} />
+              </View>
+
+              {/* Copy link */}
+              <TouchableOpacity
+                onPress={async () => {
+                  await Clipboard.setStringAsync('https://bloomsline.care/practitioner')
+                  setInviteCopied(true)
+                  Alert.alert('Copied!', 'Practitioner sign-up link copied to clipboard.')
+                  setTimeout(() => setInviteCopied(false), 2000)
+                }}
+                activeOpacity={0.7}
+                style={{
+                  flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+                  width: '100%', paddingVertical: 12, borderRadius: 12,
+                  borderWidth: 1, borderColor: '#e5e7eb', backgroundColor: '#f9fafb',
+                  marginHorizontal: 4,
+                }}
+              >
+                {inviteCopied ? (
+                  <>
+                    <Check size={16} color="#059669" />
+                    <Text style={{ fontSize: 14, fontWeight: '500', color: '#059669' }}>Copied!</Text>
+                  </>
+                ) : (
+                  <>
+                    <Plus size={16} color="#6b7280" />
+                    <Text style={{ fontSize: 14, fontWeight: '500', color: '#374151' }}>Copy practitioner sign-up link</Text>
+                  </>
+                )}
+              </TouchableOpacity>
             </View>
           )}
         </TouchableOpacity>
 
+        {/* ============================================ */}
+        {/* MY STORIES (always visible) */}
+        {/* ============================================ */}
+        <View style={{ marginBottom: 24 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+              <BookOpen size={18} color="#f59e0b" />
+              <Text style={{ fontSize: 17, fontWeight: '700', color: '#171717' }}>My Stories</Text>
+            </View>
+            <TouchableOpacity onPress={() => router.push('/stories' as any)}>
+              <Text style={{ fontSize: 13, fontWeight: '600', color: '#f59e0b' }}>View all</Text>
+            </TouchableOpacity>
+          </View>
+
+          {!practitioner && (
+            <View style={{
+              backgroundColor: '#fffbeb', borderRadius: 14, padding: 14, marginBottom: 12,
+              borderWidth: 1, borderColor: '#fde68a',
+            }}>
+              <Text style={{ fontSize: 13, color: '#92400e', lineHeight: 18 }}>
+                Share your progress through stories — even before connecting with a practitioner.
+              </Text>
+            </View>
+          )}
+
+          {memberStories.length > 0 ? (
+            <View style={{ gap: 8 }}>
+              {memberStories.slice(0, 3).map((story) => (
+                <TouchableOpacity
+                  key={story.id}
+                  activeOpacity={0.7}
+                  onPress={() => router.push('/stories' as any)}
+                  style={{
+                    flexDirection: 'row', alignItems: 'center', gap: 12,
+                    backgroundColor: '#fff', borderRadius: 16, padding: 14,
+                    borderWidth: 1, borderColor: '#f3f4f6',
+                  }}
+                >
+                  <LinearGradient
+                    colors={['#f59e0b', '#ea580c']}
+                    style={{ width: 40, height: 40, borderRadius: 12, alignItems: 'center', justifyContent: 'center' }}
+                  >
+                    <BookOpen size={20} color="#fff" />
+                  </LinearGradient>
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ fontSize: 14, fontWeight: '600', color: '#171717' }} numberOfLines={1}>
+                      {story.title}
+                    </Text>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 4 }}>
+                      <View style={{
+                        flexDirection: 'row', alignItems: 'center', gap: 4,
+                        backgroundColor: story.published ? '#ecfdf5' : '#f3f4f6',
+                        borderRadius: 8, paddingHorizontal: 8, paddingVertical: 2,
+                      }}>
+                        {story.published ? <Globe size={10} color="#059669" /> : <Lock size={10} color="#6b7280" />}
+                        <Text style={{ fontSize: 11, fontWeight: '500', color: story.published ? '#059669' : '#6b7280' }}>
+                          {story.published ? 'Published' : 'Draft'}
+                        </Text>
+                      </View>
+                      <Text style={{ fontSize: 11, color: '#9ca3af' }}>
+                        {formatDate(story.created_at)}
+                      </Text>
+                    </View>
+                  </View>
+                  <ChevronRight size={18} color="#d1d5db" />
+                </TouchableOpacity>
+              ))}
+            </View>
+          ) : (
+            <View style={{
+              backgroundColor: '#fff', borderRadius: 20, padding: 32, alignItems: 'center',
+              borderWidth: 1, borderColor: '#f3f4f6',
+            }}>
+              <View style={{
+                width: 56, height: 56, borderRadius: 28, backgroundColor: '#fef3c7',
+                alignItems: 'center', justifyContent: 'center', marginBottom: 12,
+              }}>
+                <BookOpen size={28} color="#f59e0b" />
+              </View>
+              <Text style={{ fontSize: 15, fontWeight: '600', color: '#171717' }}>No stories yet</Text>
+              <Text style={{ fontSize: 13, color: '#9ca3af', marginTop: 4, textAlign: 'center' }}>
+                Share your progress journey through stories.
+              </Text>
+              <TouchableOpacity
+                onPress={() => router.push('/stories' as any)}
+                style={{
+                  flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 16,
+                  backgroundColor: '#f59e0b', borderRadius: 14, paddingHorizontal: 20, paddingVertical: 12,
+                }}
+              >
+                <Plus size={18} color="#fff" />
+                <Text style={{ fontSize: 14, fontWeight: '600', color: '#fff' }}>Create Story</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+        </View>
+
+        {practitioner && (<>
         {/* ============================================ */}
         {/* RESOURCES SECTION */}
         {/* ============================================ */}
@@ -1803,6 +2023,7 @@ export default function PractitionerScreen() {
             ))}
           </View>
         </View>
+        </>)}
       </ScrollView>
 
       {/* ============================================ */}
