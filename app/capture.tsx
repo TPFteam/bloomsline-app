@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback, createElement } from 'react'
 import {
   View,
   Text,
@@ -27,7 +27,7 @@ import {
 import {
   X,
   Camera,
-  Video,
+  Video as VideoIcon,
   Mic,
   FileText,
   Sparkles,
@@ -40,7 +40,10 @@ import {
   ChevronLeft,
   Minimize2,
   Plus,
+  Play,
+  Pause,
 } from 'lucide-react-native'
+import { Video as AVVideo, ResizeMode } from 'expo-av'
 import { createMoment, type MediaItem } from '@/lib/services/moments'
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window')
@@ -53,6 +56,35 @@ function showAlert(title: string, message: string) {
   } else {
     Alert.alert(title, message)
   }
+}
+
+// Cross-platform video player — HTML5 <video> on web, expo-av on native
+function VideoPlayer({ uri, width, height, autoPlay = false }: {
+  uri: string; width: number; height: number; autoPlay?: boolean
+}) {
+  if (Platform.OS === 'web') {
+    return createElement('video', {
+      src: uri,
+      controls: true,
+      autoPlay,
+      playsInline: true,
+      style: {
+        width, height,
+        objectFit: 'contain',
+        backgroundColor: '#000',
+        borderRadius: 8,
+      },
+    })
+  }
+  return (
+    <AVVideo
+      source={{ uri }}
+      style={{ width, height }}
+      resizeMode={ResizeMode.CONTAIN}
+      useNativeControls
+      shouldPlay={autoPlay}
+    />
+  )
 }
 
 type CaptureType = 'photo' | 'video' | 'voice' | 'write'
@@ -171,10 +203,16 @@ export default function CaptureScreen() {
   // Track the duration of the current recording for the audio item
   const currentRecordingTimeRef = useRef(0)
 
+  // Audio playback in preview
+  const [playingIndex, setPlayingIndex] = useState<number | null>(null)
+  const [playbackTime, setPlaybackTime] = useState(0)
+  const playbackTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
   // Cleanup
   useEffect(() => {
     return () => {
       if (timerRef.current) clearInterval(timerRef.current)
+      if (playbackTimerRef.current) clearInterval(playbackTimerRef.current)
       if (playerRef.current) playerRef.current.release()
     }
   }, [])
@@ -229,6 +267,7 @@ export default function CaptureScreen() {
   }
 
   const removeMediaItem = (index: number) => {
+    if (playingIndex === index) stopPlayback()
     setCapturedItems(prev => prev.filter((_, i) => i !== index))
   }
 
@@ -363,6 +402,7 @@ export default function CaptureScreen() {
         playsInSilentMode: true,
       })
 
+      await recorder.prepareToRecordAsync()
       recorder.record()
       setIsRecording(true)
       setRecordingTime(0)
@@ -403,6 +443,59 @@ export default function CaptureScreen() {
     } catch (err) {
       console.error('Error stopping recording:', err)
     }
+  }
+
+  // ============================================
+  // AUDIO PLAYBACK IN PREVIEW
+  // ============================================
+  const togglePlayback = (index: number) => {
+    const item = capturedItems[index]
+    if (!item || !item.mimeType.startsWith('audio/')) return
+
+    // If already playing this item, stop it
+    if (playingIndex === index) {
+      stopPlayback()
+      return
+    }
+
+    // Stop any current playback
+    stopPlayback()
+
+    try {
+      const player = createAudioPlayer(item.uri)
+      playerRef.current = player
+      setPlayingIndex(index)
+      setPlaybackTime(0)
+
+      player.play()
+
+      playbackTimerRef.current = setInterval(() => {
+        setPlaybackTime(prev => prev + 1)
+      }, 1000)
+
+      // Auto-stop when done
+      player.addListener('playbackStatusUpdate', (status) => {
+        if (status.didJustFinish) {
+          stopPlayback()
+        }
+      })
+    } catch (err) {
+      console.error('Error playing audio:', err)
+      showAlert('Error', 'Could not play audio.')
+    }
+  }
+
+  const stopPlayback = () => {
+    if (playbackTimerRef.current) {
+      clearInterval(playbackTimerRef.current)
+      playbackTimerRef.current = null
+    }
+    if (playerRef.current) {
+      playerRef.current.release()
+      playerRef.current = null
+    }
+    setPlayingIndex(null)
+    setPlaybackTime(0)
   }
 
   // ============================================
@@ -509,9 +602,10 @@ export default function CaptureScreen() {
   const THUMB_SIZE = Math.floor((SCREEN_WIDTH - 48 - THUMB_GAP * (THUMB_COLS - 1)) / THUMB_COLS)
 
   // Render a single media item at given size
-  const renderMediaThumb = (item: MediaItem, size: number, radius: number) => {
+  const renderMediaThumb = (item: MediaItem, size: number, radius: number, itemIndex?: number) => {
     const typeIcon = getTypeIcon(item.mimeType)
     const colors = getTypeColors(item.mimeType)
+    const isPlaying = itemIndex !== undefined && playingIndex === itemIndex
 
     if (typeIcon === 'photo') {
       return (
@@ -522,6 +616,136 @@ export default function CaptureScreen() {
         />
       )
     }
+
+    if (typeIcon === 'voice') {
+      const duration = item.durationSeconds || 0
+      const progress = isPlaying && duration > 0 ? Math.min(playbackTime / duration, 1) : 0
+      const isLarge = size > 120
+
+      if (isLarge) {
+        // Full audio player card for single-item / expanded view
+        const cardWidth = Math.min(size, SCREEN_WIDTH - 48)
+        return (
+          <TouchableOpacity
+            activeOpacity={0.9}
+            onPress={(e) => {
+              e.stopPropagation?.()
+              if (itemIndex !== undefined) togglePlayback(itemIndex)
+            }}
+          >
+            <View style={{
+              width: cardWidth, paddingVertical: 32, paddingHorizontal: 24,
+              borderRadius: radius, backgroundColor: 'rgba(255,255,255,0.08)',
+              borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)',
+              alignItems: 'center', gap: 20,
+            }}>
+              {/* Fake waveform bars */}
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3, height: 48 }}>
+                {Array.from({ length: 24 }).map((_, i) => {
+                  const barProgress = i / 24
+                  const isActive = isPlaying && barProgress <= progress
+                  // Pseudo-random heights for waveform look
+                  const heights = [0.3, 0.5, 0.7, 1, 0.8, 0.4, 0.6, 0.9, 0.5, 0.7, 1, 0.6, 0.4, 0.8, 0.9, 0.5, 0.3, 0.7, 1, 0.6, 0.8, 0.4, 0.5, 0.7]
+                  const h = (heights[i] || 0.5) * 48
+                  return (
+                    <View
+                      key={i}
+                      style={{
+                        width: Math.max(Math.floor((cardWidth - 48 - 23 * 3) / 24), 3),
+                        height: h,
+                        borderRadius: 2,
+                        backgroundColor: isActive ? '#f97316' : 'rgba(255,255,255,0.2)',
+                      }}
+                    />
+                  )
+                })}
+              </View>
+
+              {/* Play button + time */}
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16 }}>
+                <View style={{
+                  width: 56, height: 56, borderRadius: 28,
+                  backgroundColor: isPlaying ? 'rgba(249,115,22,0.2)' : 'rgba(255,255,255,0.1)',
+                  alignItems: 'center', justifyContent: 'center',
+                  borderWidth: 2, borderColor: isPlaying ? '#f97316' : 'rgba(255,255,255,0.2)',
+                }}>
+                  {isPlaying
+                    ? <Pause size={24} color="#f97316" />
+                    : <Play size={24} color="#fff" style={{ marginLeft: 2 }} />
+                  }
+                </View>
+                <View>
+                  <Text style={{ color: '#fff', fontSize: 22, fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace' }}>
+                    {isPlaying ? formatTime(playbackTime) : formatTime(duration)}
+                  </Text>
+                  <Text style={{ color: 'rgba(255,255,255,0.4)', fontSize: 12, marginTop: 2 }}>
+                    {isPlaying ? 'Playing...' : 'Tap to play'}
+                  </Text>
+                </View>
+              </View>
+
+              {/* Progress bar */}
+              <View style={{ width: '100%', height: 3, borderRadius: 2, backgroundColor: 'rgba(255,255,255,0.1)' }}>
+                <View style={{ width: `${progress * 100}%`, height: 3, borderRadius: 2, backgroundColor: '#f97316' }} />
+              </View>
+            </View>
+          </TouchableOpacity>
+        )
+      }
+
+      // Small thumbnail for grid view — mini waveform + play
+      const barCount = 9
+      const barW = Math.max(Math.floor((size - 24 - (barCount - 1) * 2) / barCount), 2)
+      const waveHeights = [0.3, 0.6, 1, 0.7, 0.9, 0.5, 0.8, 0.4, 0.6]
+      return (
+        <TouchableOpacity
+          activeOpacity={0.8}
+          onPress={(e) => {
+            e.stopPropagation?.()
+            if (itemIndex !== undefined) togglePlayback(itemIndex)
+          }}
+        >
+          <LinearGradient
+            colors={isPlaying ? ['#ef4444', '#f97316'] : colors}
+            style={{
+              width: size, height: size, borderRadius: radius,
+              padding: 10, justifyContent: 'space-between',
+            }}
+          >
+            {/* Mini waveform */}
+            <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 2, height: size * 0.35 }}>
+              {waveHeights.map((h, i) => {
+                const barActive = isPlaying && (i / barCount) <= progress
+                return (
+                  <View key={i} style={{
+                    width: barW, height: h * size * 0.35, borderRadius: 1,
+                    backgroundColor: barActive ? '#fff' : 'rgba(255,255,255,0.35)',
+                  }} />
+                )
+              })}
+            </View>
+            {/* Bottom: play icon + time */}
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+              <View style={{
+                width: 22, height: 22, borderRadius: 11,
+                backgroundColor: 'rgba(255,255,255,0.3)',
+                alignItems: 'center', justifyContent: 'center',
+              }}>
+                {isPlaying
+                  ? <Pause size={10} color="#fff" />
+                  : <Play size={10} color="#fff" style={{ marginLeft: 1 }} />
+                }
+              </View>
+              <Text style={{ color: '#fff', fontSize: 10, fontWeight: '600' }}>
+                {isPlaying ? formatTime(playbackTime) : formatTime(duration)}
+              </Text>
+            </View>
+          </LinearGradient>
+        </TouchableOpacity>
+      )
+    }
+
+    // Video thumbnail — gradient with centered play button
     return (
       <LinearGradient
         colors={colors}
@@ -530,17 +754,21 @@ export default function CaptureScreen() {
           alignItems: 'center', justifyContent: 'center',
         }}
       >
-        {typeIcon === 'video' && <Video size={size > 120 ? 48 : 24} color="#fff" />}
-        {typeIcon === 'voice' && (
-          <View style={{ alignItems: 'center', gap: 4 }}>
-            <Mic size={size > 120 ? 48 : 24} color="#fff" />
-            {item.durationSeconds != null && (
-              <Text style={{ color: 'rgba(255,255,255,0.8)', fontSize: size > 120 ? 16 : 11 }}>
-                {formatTime(item.durationSeconds)}
-              </Text>
-            )}
-          </View>
-        )}
+        {/* Play circle */}
+        <View style={{
+          width: size * 0.4, height: size * 0.4, borderRadius: size * 0.2,
+          backgroundColor: 'rgba(255,255,255,0.25)',
+          alignItems: 'center', justifyContent: 'center',
+        }}>
+          <Play size={size > 120 ? 28 : 16} color="#fff" style={{ marginLeft: size > 120 ? 3 : 2 }} />
+        </View>
+        {/* Label at bottom */}
+        <Text style={{
+          color: 'rgba(255,255,255,0.7)', fontSize: size > 120 ? 13 : 10,
+          fontWeight: '600', marginTop: size > 120 ? 8 : 4,
+        }}>
+          Video
+        </Text>
       </LinearGradient>
     )
   }
@@ -553,51 +781,62 @@ export default function CaptureScreen() {
     return (
       <View style={{ flex: 1, justifyContent: 'space-between' }}>
         {/* Fullscreen overlay for expanded item */}
-        {expandedIndex !== null && capturedItems[expandedIndex] && (
-          <View style={{
-            position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
-            zIndex: 100, backgroundColor: 'rgba(0,0,0,0.9)',
-            alignItems: 'center', justifyContent: 'center',
-          }}>
-            {getTypeIcon(capturedItems[expandedIndex].mimeType) === 'photo' ? (
-              <Image
-                source={{ uri: capturedItems[expandedIndex].uri }}
-                style={{ width: SCREEN_WIDTH, height: SCREEN_WIDTH }}
-                resizeMode="contain"
-              />
-            ) : (
-              renderMediaThumb(capturedItems[expandedIndex], SCREEN_WIDTH - 48, 24)
-            )}
-            {/* Minimize button */}
-            <TouchableOpacity
-              onPress={() => setExpandedIndex(null)}
-              style={{
-                position: 'absolute', top: 16, right: 16,
-                width: 40, height: 40, borderRadius: 20,
-                backgroundColor: 'rgba(255,255,255,0.2)',
-                alignItems: 'center', justifyContent: 'center',
-              }}
-            >
-              <Minimize2 size={20} color="#fff" />
-            </TouchableOpacity>
-            {/* Delete from expanded view */}
-            <TouchableOpacity
-              onPress={() => {
-                const idx = expandedIndex
-                setExpandedIndex(null)
-                removeMediaItem(idx)
-              }}
-              style={{
-                position: 'absolute', top: 16, left: 16,
-                width: 40, height: 40, borderRadius: 20,
-                backgroundColor: 'rgba(255,255,255,0.2)',
-                alignItems: 'center', justifyContent: 'center',
-              }}
-            >
-              <Trash2 size={20} color="#fff" />
-            </TouchableOpacity>
-          </View>
-        )}
+        {expandedIndex !== null && capturedItems[expandedIndex] && (() => {
+          const expItem = capturedItems[expandedIndex]
+          const expType = getTypeIcon(expItem.mimeType)
+          return (
+            <View style={{
+              position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
+              zIndex: 100, backgroundColor: 'rgba(0,0,0,0.9)',
+              alignItems: 'center', justifyContent: 'center',
+            }}>
+              {expType === 'photo' ? (
+                <Image
+                  source={{ uri: expItem.uri }}
+                  style={{ width: SCREEN_WIDTH, height: SCREEN_WIDTH }}
+                  resizeMode="contain"
+                />
+              ) : expType === 'video' ? (
+                <VideoPlayer
+                  uri={expItem.uri}
+                  width={SCREEN_WIDTH}
+                  height={SCREEN_WIDTH * 9 / 16}
+                  autoPlay
+                />
+              ) : (
+                renderMediaThumb(expItem, SCREEN_WIDTH - 48, 24, expandedIndex)
+              )}
+              {/* Minimize button */}
+              <TouchableOpacity
+                onPress={() => setExpandedIndex(null)}
+                style={{
+                  position: 'absolute', top: 16, right: 16,
+                  width: 40, height: 40, borderRadius: 20,
+                  backgroundColor: 'rgba(255,255,255,0.2)',
+                  alignItems: 'center', justifyContent: 'center',
+                }}
+              >
+                <Minimize2 size={20} color="#fff" />
+              </TouchableOpacity>
+              {/* Delete from expanded view */}
+              <TouchableOpacity
+                onPress={() => {
+                  const idx = expandedIndex
+                  setExpandedIndex(null)
+                  removeMediaItem(idx)
+                }}
+                style={{
+                  position: 'absolute', top: 16, left: 16,
+                  width: 40, height: 40, borderRadius: 20,
+                  backgroundColor: 'rgba(255,255,255,0.2)',
+                  alignItems: 'center', justifyContent: 'center',
+                }}
+              >
+                <Trash2 size={20} color="#fff" />
+              </TouchableOpacity>
+            </View>
+          )
+        })()}
 
         {isSingle && singleItem ? (
           /* ---- SINGLE ITEM: fullscreen preview ---- */
@@ -614,9 +853,17 @@ export default function CaptureScreen() {
                   style={{ position: 'absolute', left: 0, right: 0, bottom: 0, height: 200 }}
                 />
               </View>
+            ) : singleType === 'video' ? (
+              <View style={{ flex: 1, justifyContent: 'center', backgroundColor: '#000' }}>
+                <VideoPlayer
+                  uri={singleItem.uri}
+                  width={SCREEN_WIDTH}
+                  height={SCREEN_WIDTH * 9 / 16}
+                />
+              </View>
             ) : (
               <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
-                {renderMediaThumb(singleItem, 200, 24)}
+                {renderMediaThumb(singleItem, 200, 24, 0)}
               </View>
             )}
 
@@ -660,7 +907,7 @@ export default function CaptureScreen() {
                   onPress={() => setExpandedIndex(idx)}
                   style={{ position: 'relative', width: THUMB_SIZE, height: THUMB_SIZE }}
                 >
-                  {renderMediaThumb(item, THUMB_SIZE, 14)}
+                  {renderMediaThumb(item, THUMB_SIZE, 14, idx)}
 
                   {/* Delete button */}
                   <TouchableOpacity
@@ -718,7 +965,7 @@ export default function CaptureScreen() {
             <View style={{ flexDirection: 'row', justifyContent: 'space-evenly' }}>
               {([
                 { label: 'Photo', icon: Camera, colors: ['#fb7185', '#ec4899'] as [string, string], onPress: quickAddPhoto },
-                { label: 'Video', icon: Video, colors: ['#a78bfa', '#8b5cf6'] as [string, string], onPress: quickAddVideo },
+                { label: 'Video', icon: VideoIcon, colors: ['#a78bfa', '#8b5cf6'] as [string, string], onPress: quickAddVideo },
                 { label: 'Voice', icon: Mic, colors: ['#fbbf24', '#f97316'] as [string, string], onPress: quickAddVoice },
                 { label: 'Upload', icon: Upload, colors: ['rgba(255,255,255,0.25)', 'rgba(255,255,255,0.15)'] as [string, string], onPress: quickAddUpload },
               ]).map(({ label, icon: Icon, colors, onPress }) => (
@@ -854,7 +1101,23 @@ export default function CaptureScreen() {
             )}
           </View>
 
-          <View style={{ width: 40 }} />
+          {currentStep !== STEP_SELECT ? (
+            <TouchableOpacity
+              onPress={() => {
+                stopPlayback()
+                router.canDismiss() ? router.dismiss() : router.replace('/(tabs)')
+              }}
+              style={{
+                width: 40, height: 40, borderRadius: 20,
+                backgroundColor: 'rgba(255,255,255,0.1)',
+                alignItems: 'center', justifyContent: 'center',
+              }}
+            >
+              <X size={20} color="#ffffff" />
+            </TouchableOpacity>
+          ) : (
+            <View style={{ width: 40 }} />
+          )}
         </View>
 
         {/* Step Indicator */}
@@ -903,7 +1166,7 @@ export default function CaptureScreen() {
                         style={{ width: 56, height: 56, borderRadius: 16, alignItems: 'center', justifyContent: 'center' }}
                       >
                         {type.id === 'photo' && <Camera size={28} color="#fff" />}
-                        {type.id === 'video' && <Video size={28} color="#fff" />}
+                        {type.id === 'video' && <VideoIcon size={28} color="#fff" />}
                       </LinearGradient>
                       <Text style={{ color: '#ffffff', fontWeight: '600', fontSize: 15 }}>{type.label}</Text>
                       <Text style={{ color: 'rgba(255,255,255,0.4)', fontSize: 11, textAlign: 'center' }}>{type.desc}</Text>
@@ -1017,7 +1280,7 @@ export default function CaptureScreen() {
                       marginBottom: 16,
                     }}
                   >
-                    <Video size={48} color="#fff" />
+                    <VideoIcon size={48} color="#fff" />
                   </LinearGradient>
                   <Text style={{ color: '#ffffff', fontSize: 16, fontWeight: '500', textAlign: 'center', paddingHorizontal: 32 }}>
                     Tap to record a video
@@ -1242,7 +1505,7 @@ export default function CaptureScreen() {
                         colors={colors}
                         style={{ width: 64, height: 64, borderRadius: 14, alignItems: 'center', justifyContent: 'center' }}
                       >
-                        {typeIcon === 'video' && <Video size={24} color="#fff" />}
+                        {typeIcon === 'video' && <VideoIcon size={24} color="#fff" />}
                         {typeIcon === 'voice' && <Mic size={24} color="#fff" />}
                       </LinearGradient>
                     )
