@@ -38,7 +38,6 @@ import {
   Send,
   MicOff,
   ChevronLeft,
-  Plus,
   Play,
 } from 'lucide-react-native'
 import { createMoment, type MediaItem } from '@/lib/services/moments'
@@ -219,14 +218,6 @@ export default function CaptureScreen() {
   }
 
   // ============================================
-  // "ADD MORE" — loop back to type selection
-  // ============================================
-  const handleAddMore = () => {
-    setCaptureType(null)
-    goToStep(STEP_SELECT)
-  }
-
-  // ============================================
   // PHOTO HANDLING
   // ============================================
   const pickPhoto = async (useCamera: boolean) => {
@@ -292,6 +283,33 @@ export default function CaptureScreen() {
         mimeType: asset.mimeType || 'video/mp4',
       })
     }
+  }
+
+  // ============================================
+  // QUICK-ADD from preview — triggers capture directly, stays on preview
+  // ============================================
+  const quickAddPhoto = () => {
+    if (atItemLimit) return
+    Alert.alert('Add Photo', 'Choose a source', [
+      { text: 'Camera', onPress: () => pickPhoto(true) },
+      { text: 'Gallery', onPress: () => pickPhoto(false) },
+      { text: 'Cancel', style: 'cancel' },
+    ])
+  }
+
+  const quickAddVideo = () => {
+    if (atItemLimit) return
+    Alert.alert('Add Video', 'Choose a source', [
+      { text: 'Record', onPress: () => pickVideo(true) },
+      { text: 'Gallery', onPress: () => pickVideo(false) },
+      { text: 'Cancel', style: 'cancel' },
+    ])
+  }
+
+  const quickAddVoice = () => {
+    if (atItemLimit) return
+    setCaptureType('voice')
+    goToStep(STEP_CAPTURE)
   }
 
   // ============================================
@@ -570,58 +588,80 @@ export default function CaptureScreen() {
         </View>
       ) : null}
 
-      {/* Action buttons at bottom */}
-      <View style={{
-        padding: 24, paddingBottom: 48,
-        flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 12,
-      }}>
-        <TouchableOpacity
-          onPress={resetCapture}
-          style={{
-            width: 48, height: 48, borderRadius: 24,
-            backgroundColor: 'rgba(255,255,255,0.15)',
-            alignItems: 'center', justifyContent: 'center',
-          }}
-        >
-          <Trash2 size={20} color="#fff" />
-        </TouchableOpacity>
-
+      {/* Quick-add bar + Continue */}
+      <View style={{ paddingHorizontal: 24, paddingBottom: 48, gap: 14 }}>
+        {/* Quick-add type icons */}
         {!atItemLimit && (
-          <TouchableOpacity
-            onPress={handleAddMore}
-            activeOpacity={0.8}
-            style={{
-              flexDirection: 'row', alignItems: 'center', gap: 6,
-              paddingHorizontal: 20, paddingVertical: 14,
-              backgroundColor: 'rgba(255,255,255,0.15)',
-              borderRadius: 999,
-            }}
-          >
-            <Plus size={18} color="#fff" />
-            <Text style={{ color: '#fff', fontWeight: '600', fontSize: 14 }}>Add more</Text>
-          </TouchableOpacity>
+          <View style={{
+            flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 12,
+          }}>
+            <Text style={{ color: 'rgba(255,255,255,0.4)', fontSize: 12, marginRight: 4 }}>Add</Text>
+            {([
+              { type: 'photo' as const, icon: Camera, colors: ['#fb7185', '#ec4899'] as [string, string], onPress: quickAddPhoto },
+              { type: 'video' as const, icon: Video, colors: ['#a78bfa', '#8b5cf6'] as [string, string], onPress: quickAddVideo },
+              { type: 'voice' as const, icon: Mic, colors: ['#fbbf24', '#f97316'] as [string, string], onPress: quickAddVoice },
+            ]).map(({ type, icon: Icon, colors, onPress }) => (
+              <TouchableOpacity
+                key={type}
+                onPress={onPress}
+                activeOpacity={0.8}
+              >
+                <LinearGradient
+                  colors={colors}
+                  style={{
+                    width: 44, height: 44, borderRadius: 14,
+                    alignItems: 'center', justifyContent: 'center',
+                  }}
+                >
+                  <Icon size={20} color="#fff" />
+                </LinearGradient>
+              </TouchableOpacity>
+            ))}
+          </View>
         )}
 
-        <TouchableOpacity
-          onPress={() => {
-            const nextStep = STEP_DETAILS
-            setMaxReachedStep(prev => Math.max(prev, nextStep))
-            goToStep(nextStep)
-          }}
-          activeOpacity={0.8}
-          style={{ flex: 1, maxWidth: 200 }}
-        >
-          <LinearGradient
-            colors={['#34d399', '#14b8a6']}
+        {atItemLimit && (
+          <Text style={{ color: '#f97316', textAlign: 'center', fontSize: 13 }}>
+            Maximum {MAX_ITEMS} items reached
+          </Text>
+        )}
+
+        {/* Bottom row: trash + continue */}
+        <View style={{
+          flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 12,
+        }}>
+          <TouchableOpacity
+            onPress={resetCapture}
             style={{
-              height: 48, borderRadius: 24,
-              flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
+              width: 48, height: 48, borderRadius: 24,
+              backgroundColor: 'rgba(255,255,255,0.15)',
+              alignItems: 'center', justifyContent: 'center',
             }}
           >
-            <Sparkles size={18} color="#fff" />
-            <Text style={{ color: '#fff', fontWeight: '600', fontSize: 15 }}>Continue</Text>
-          </LinearGradient>
-        </TouchableOpacity>
+            <Trash2 size={20} color="#fff" />
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            onPress={() => {
+              const nextStep = STEP_DETAILS
+              setMaxReachedStep(prev => Math.max(prev, nextStep))
+              goToStep(nextStep)
+            }}
+            activeOpacity={0.8}
+            style={{ flex: 1, maxWidth: 240 }}
+          >
+            <LinearGradient
+              colors={['#34d399', '#14b8a6']}
+              style={{
+                height: 48, borderRadius: 24,
+                flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
+              }}
+            >
+              <Sparkles size={18} color="#fff" />
+              <Text style={{ color: '#fff', fontWeight: '600', fontSize: 15 }}>Continue</Text>
+            </LinearGradient>
+          </TouchableOpacity>
+        </View>
       </View>
     </View>
   )
@@ -700,9 +740,7 @@ export default function CaptureScreen() {
           <View style={{ width: SCREEN_WIDTH, flex: 1 }}>
             <View style={{ flex: 1, padding: 24 }}>
               <Text style={{ color: 'rgba(255,255,255,0.5)', textAlign: 'center', marginBottom: 32, fontSize: 15 }}>
-                {capturedItems.length > 0
-                  ? 'Add another item to your moment'
-                  : 'How would you like to capture this moment?'}
+                How would you like to capture this moment?
               </Text>
 
               <View style={{ gap: 14, width: '100%', maxWidth: 340, alignSelf: 'center' }}>
@@ -711,18 +749,17 @@ export default function CaptureScreen() {
                   {captureTypes.slice(0, 2).map((type) => (
                     <TouchableOpacity
                       key={type.id}
-                      onPress={() => !atItemLimit && handleTypeSelect(type.id)}
-                      activeOpacity={atItemLimit ? 1 : 0.8}
+                      onPress={() => handleTypeSelect(type.id)}
+                      activeOpacity={0.8}
                       style={{
                         flex: 1,
-                        backgroundColor: atItemLimit ? 'rgba(255,255,255,0.04)' : captureType === type.id ? 'rgba(255,255,255,0.15)' : 'rgba(255,255,255,0.08)',
+                        backgroundColor: captureType === type.id ? 'rgba(255,255,255,0.15)' : 'rgba(255,255,255,0.08)',
                         borderRadius: 24,
                         padding: 20,
                         alignItems: 'center',
                         gap: 10,
                         borderWidth: captureType === type.id ? 2 : 1,
                         borderColor: captureType === type.id ? type.colors[0] : 'rgba(255,255,255,0.08)',
-                        opacity: atItemLimit ? 0.4 : 1,
                       }}
                     >
                       <LinearGradient
@@ -742,18 +779,17 @@ export default function CaptureScreen() {
                   {captureTypes.slice(2, 4).map((type) => (
                     <TouchableOpacity
                       key={type.id}
-                      onPress={() => !atItemLimit && handleTypeSelect(type.id)}
-                      activeOpacity={atItemLimit ? 1 : 0.8}
+                      onPress={() => handleTypeSelect(type.id)}
+                      activeOpacity={0.8}
                       style={{
                         flex: 1,
-                        backgroundColor: atItemLimit ? 'rgba(255,255,255,0.04)' : captureType === type.id ? 'rgba(255,255,255,0.15)' : 'rgba(255,255,255,0.08)',
+                        backgroundColor: captureType === type.id ? 'rgba(255,255,255,0.15)' : 'rgba(255,255,255,0.08)',
                         borderRadius: 24,
                         padding: 20,
                         alignItems: 'center',
                         gap: 10,
                         borderWidth: captureType === type.id ? 2 : 1,
                         borderColor: captureType === type.id ? type.colors[0] : 'rgba(255,255,255,0.08)',
-                        opacity: atItemLimit ? 0.4 : 1,
                       }}
                     >
                       <LinearGradient
@@ -769,36 +805,6 @@ export default function CaptureScreen() {
                   ))}
                 </View>
               </View>
-
-              {/* At limit notice */}
-              {atItemLimit && (
-                <Text style={{ color: '#f97316', textAlign: 'center', marginTop: 24, fontSize: 13 }}>
-                  Maximum {MAX_ITEMS} items reached
-                </Text>
-              )}
-
-              {/* If items exist, show shortcut to continue */}
-              {capturedItems.length > 0 && !atItemLimit && (
-                <TouchableOpacity
-                  onPress={() => {
-                    const nextStep = STEP_PREVIEW
-                    setMaxReachedStep(prev => Math.max(prev, nextStep))
-                    goToStep(nextStep)
-                  }}
-                  activeOpacity={0.8}
-                  style={{ alignSelf: 'center', marginTop: 24 }}
-                >
-                  <View style={{
-                    flexDirection: 'row', alignItems: 'center', gap: 6,
-                    paddingHorizontal: 20, paddingVertical: 12,
-                    backgroundColor: 'rgba(255,255,255,0.1)', borderRadius: 999,
-                  }}>
-                    <Text style={{ color: 'rgba(255,255,255,0.7)', fontSize: 14, fontWeight: '500' }}>
-                      Skip to preview ({capturedItems.length} item{capturedItems.length !== 1 ? 's' : ''})
-                    </Text>
-                  </View>
-                </TouchableOpacity>
-              )}
             </View>
           </View>
 
