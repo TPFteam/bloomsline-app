@@ -38,12 +38,22 @@ import {
   Send,
   MicOff,
   ChevronLeft,
-  Play,
+  Minimize2,
+  Plus,
 } from 'lucide-react-native'
 import { createMoment, type MediaItem } from '@/lib/services/moments'
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window')
 const MAX_ITEMS = 7
+
+// Cross-platform alert that works on web too
+function showAlert(title: string, message: string) {
+  if (Platform.OS === 'web') {
+    window.alert(`${title}: ${message}`)
+  } else {
+    Alert.alert(title, message)
+  }
+}
 
 type CaptureType = 'photo' | 'video' | 'voice' | 'write'
 
@@ -141,6 +151,11 @@ export default function CaptureScreen() {
   const [capturedItems, setCapturedItems] = useState<MediaItem[]>([])
   const [writtenText, setWrittenText] = useState('')
 
+  // Preview expanded item (fullscreen overlay)
+  const [expandedIndex, setExpandedIndex] = useState<number | null>(null)
+  // Floating add menu
+  const [showAddMenu, setShowAddMenu] = useState(false)
+
   // Details
   const [selectedMoods, setSelectedMoods] = useState<string[]>([])
   const [caption, setCaption] = useState('')
@@ -226,7 +241,7 @@ export default function CaptureScreen() {
       : await ImagePicker.requestMediaLibraryPermissionsAsync()
 
     if (!permResult.granted) {
-      Alert.alert('Permission needed', 'Please allow access to continue.')
+      showAlert('Permission needed', 'Please allow access to continue.')
       return
     }
 
@@ -258,7 +273,7 @@ export default function CaptureScreen() {
       : await ImagePicker.requestMediaLibraryPermissionsAsync()
 
     if (!permResult.granted) {
-      Alert.alert('Permission needed', 'Please allow access to continue.')
+      showAlert('Permission needed', 'Please allow access to continue.')
       return
     }
 
@@ -275,7 +290,7 @@ export default function CaptureScreen() {
     if (!result.canceled && result.assets[0]) {
       const asset = result.assets[0]
       if (asset.fileSize && asset.fileSize > 30 * 1024 * 1024) {
-        Alert.alert('Too large', 'Video must be under 30MB.')
+        showAlert('Too large', 'Video must be under 30MB.')
         return
       }
       addMediaItem({
@@ -310,7 +325,7 @@ export default function CaptureScreen() {
     if (atItemLimit) return
     const permResult = await ImagePicker.requestMediaLibraryPermissionsAsync()
     if (!permResult.granted) {
-      Alert.alert('Permission needed', 'Please allow access to continue.')
+      showAlert('Permission needed', 'Please allow access to continue.')
       return
     }
     const result = await ImagePicker.launchImageLibraryAsync({
@@ -339,7 +354,7 @@ export default function CaptureScreen() {
     try {
       const perm = await requestRecordingPermissionsAsync()
       if (!perm.granted) {
-        Alert.alert('Permission needed', 'Please allow microphone access.')
+        showAlert('Permission needed', 'Please allow microphone access.')
         return
       }
 
@@ -362,7 +377,7 @@ export default function CaptureScreen() {
       }, 1000)
     } catch (err) {
       console.error('Error starting recording:', err)
-      Alert.alert('Error', 'Could not start recording.')
+      showAlert('Error', 'Could not start recording. ' + (err instanceof Error ? err.message : ''))
     }
   }
 
@@ -388,14 +403,6 @@ export default function CaptureScreen() {
     } catch (err) {
       console.error('Error stopping recording:', err)
     }
-  }
-
-  const playAudioPreview = async (uri: string) => {
-    if (playerRef.current) playerRef.current.release()
-
-    const player = createAudioPlayer(uri)
-    playerRef.current = player
-    player.play()
   }
 
   // ============================================
@@ -428,11 +435,11 @@ export default function CaptureScreen() {
           router.replace('/(tabs)')
         }
       } else {
-        Alert.alert('Error', 'Could not save moment. Please try again.')
+        showAlert('Error', 'Could not save moment. Please try again.')
       }
     } catch (err) {
       console.error('Error saving moment:', err)
-      Alert.alert('Error', 'Something went wrong.')
+      showAlert('Error', 'Something went wrong.')
     } finally {
       setSaving(false)
     }
@@ -495,183 +502,254 @@ export default function CaptureScreen() {
   )
 
   // ============================================
-  // PREVIEW STRIP — shows all captured items
+  // PREVIEW — single item fullscreen, multi = grid with tap-to-expand
   // ============================================
-  const PreviewStrip = () => (
-    <View style={{ flex: 1, justifyContent: 'space-between' }}>
-      {/* Top: counter + items */}
-      <View style={{ flex: 1 }}>
-        {/* Counter */}
-        <View style={{ alignItems: 'center', marginTop: 16, marginBottom: 12 }}>
-          <View style={{
-            paddingHorizontal: 14, paddingVertical: 6, borderRadius: 999,
-            backgroundColor: 'rgba(255,255,255,0.12)',
-          }}>
-            <Text style={{ color: 'rgba(255,255,255,0.7)', fontSize: 13, fontWeight: '600' }}>
-              {capturedItems.length}/{MAX_ITEMS} items
-            </Text>
+  const THUMB_GAP = 10
+  const THUMB_COLS = 3
+  const THUMB_SIZE = Math.floor((SCREEN_WIDTH - 48 - THUMB_GAP * (THUMB_COLS - 1)) / THUMB_COLS)
+
+  // Render a single media item at given size
+  const renderMediaThumb = (item: MediaItem, size: number, radius: number) => {
+    const typeIcon = getTypeIcon(item.mimeType)
+    const colors = getTypeColors(item.mimeType)
+
+    if (typeIcon === 'photo') {
+      return (
+        <Image
+          source={{ uri: item.uri }}
+          style={{ width: size, height: size, borderRadius: radius }}
+          resizeMode="cover"
+        />
+      )
+    }
+    return (
+      <LinearGradient
+        colors={colors}
+        style={{
+          width: size, height: size, borderRadius: radius,
+          alignItems: 'center', justifyContent: 'center',
+        }}
+      >
+        {typeIcon === 'video' && <Video size={size > 120 ? 48 : 24} color="#fff" />}
+        {typeIcon === 'voice' && (
+          <View style={{ alignItems: 'center', gap: 4 }}>
+            <Mic size={size > 120 ? 48 : 24} color="#fff" />
+            {item.durationSeconds != null && (
+              <Text style={{ color: 'rgba(255,255,255,0.8)', fontSize: size > 120 ? 16 : 11 }}>
+                {formatTime(item.durationSeconds)}
+              </Text>
+            )}
           </View>
-        </View>
+        )}
+      </LinearGradient>
+    )
+  }
 
-        {/* Items strip */}
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={{
-            paddingHorizontal: 24, gap: 12,
-            alignItems: 'center',
-            flexGrow: 1,
-            justifyContent: 'center',
-          }}
-        >
-        {capturedItems.map((item, idx) => {
-          const typeIcon = getTypeIcon(item.mimeType)
-          const colors = getTypeColors(item.mimeType)
+  const PreviewStrip = () => {
+    const isSingle = capturedItems.length === 1
+    const singleItem = capturedItems[0]
+    const singleType = singleItem ? getTypeIcon(singleItem.mimeType) : null
 
-          return (
-            <View key={`${item.uri}-${idx}`} style={{ position: 'relative' }}>
-              {typeIcon === 'photo' ? (
+    return (
+      <View style={{ flex: 1, justifyContent: 'space-between' }}>
+        {/* Fullscreen overlay for expanded item */}
+        {expandedIndex !== null && capturedItems[expandedIndex] && (
+          <View style={{
+            position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
+            zIndex: 100, backgroundColor: 'rgba(0,0,0,0.9)',
+            alignItems: 'center', justifyContent: 'center',
+          }}>
+            {getTypeIcon(capturedItems[expandedIndex].mimeType) === 'photo' ? (
+              <Image
+                source={{ uri: capturedItems[expandedIndex].uri }}
+                style={{ width: SCREEN_WIDTH, height: SCREEN_WIDTH }}
+                resizeMode="contain"
+              />
+            ) : (
+              renderMediaThumb(capturedItems[expandedIndex], SCREEN_WIDTH - 48, 24)
+            )}
+            {/* Minimize button */}
+            <TouchableOpacity
+              onPress={() => setExpandedIndex(null)}
+              style={{
+                position: 'absolute', top: 16, right: 16,
+                width: 40, height: 40, borderRadius: 20,
+                backgroundColor: 'rgba(255,255,255,0.2)',
+                alignItems: 'center', justifyContent: 'center',
+              }}
+            >
+              <Minimize2 size={20} color="#fff" />
+            </TouchableOpacity>
+            {/* Delete from expanded view */}
+            <TouchableOpacity
+              onPress={() => {
+                const idx = expandedIndex
+                setExpandedIndex(null)
+                removeMediaItem(idx)
+              }}
+              style={{
+                position: 'absolute', top: 16, left: 16,
+                width: 40, height: 40, borderRadius: 20,
+                backgroundColor: 'rgba(255,255,255,0.2)',
+                alignItems: 'center', justifyContent: 'center',
+              }}
+            >
+              <Trash2 size={20} color="#fff" />
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {isSingle && singleItem ? (
+          /* ---- SINGLE ITEM: fullscreen preview ---- */
+          <View style={{ flex: 1 }}>
+            {singleType === 'photo' ? (
+              <View style={{ flex: 1 }}>
                 <Image
-                  source={{ uri: item.uri }}
-                  style={{
-                    width: 140, height: 180, borderRadius: 16,
-                  }}
+                  source={{ uri: singleItem.uri }}
+                  style={{ flex: 1 }}
                   resizeMode="cover"
                 />
-              ) : (
                 <LinearGradient
-                  colors={colors}
-                  style={{
-                    width: 140, height: 180, borderRadius: 16,
-                    alignItems: 'center', justifyContent: 'center',
-                  }}
-                >
-                  {typeIcon === 'video' && <Video size={36} color="#fff" />}
-                  {typeIcon === 'voice' && (
-                    <TouchableOpacity onPress={() => playAudioPreview(item.uri)}>
-                      <View style={{ alignItems: 'center', gap: 8 }}>
-                        <Mic size={36} color="#fff" />
-                        {item.durationSeconds != null && (
-                          <Text style={{ color: 'rgba(255,255,255,0.8)', fontSize: 13 }}>
-                            {formatTime(item.durationSeconds)}
-                          </Text>
-                        )}
-                        <View style={{
-                          flexDirection: 'row', alignItems: 'center', gap: 4,
-                          paddingHorizontal: 12, paddingVertical: 6, borderRadius: 999,
-                          backgroundColor: 'rgba(255,255,255,0.2)',
-                        }}>
-                          <Play size={12} color="#fff" />
-                          <Text style={{ color: '#fff', fontSize: 11 }}>Play</Text>
-                        </View>
-                      </View>
-                    </TouchableOpacity>
-                  )}
-                </LinearGradient>
-              )}
+                  colors={['transparent', 'rgba(0,0,0,0.6)']}
+                  style={{ position: 'absolute', left: 0, right: 0, bottom: 0, height: 200 }}
+                />
+              </View>
+            ) : (
+              <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
+                {renderMediaThumb(singleItem, 200, 24)}
+              </View>
+            )}
 
-              {/* Delete button */}
-              <TouchableOpacity
-                onPress={() => removeMediaItem(idx)}
-                style={{
-                  position: 'absolute', top: 6, right: 6,
-                  width: 28, height: 28, borderRadius: 14,
-                  backgroundColor: 'rgba(0,0,0,0.6)',
-                  alignItems: 'center', justifyContent: 'center',
-                }}
-              >
-                <X size={14} color="#fff" />
-              </TouchableOpacity>
-
-              {/* Sort order badge */}
-              <View style={{
-                position: 'absolute', bottom: 6, left: 6,
-                paddingHorizontal: 8, paddingVertical: 3, borderRadius: 999,
+            {/* Delete overlay */}
+            <TouchableOpacity
+              onPress={() => removeMediaItem(0)}
+              style={{
+                position: 'absolute', top: 16, right: 16,
+                width: 40, height: 40, borderRadius: 20,
                 backgroundColor: 'rgba(0,0,0,0.5)',
+                alignItems: 'center', justifyContent: 'center',
+              }}
+            >
+              <Trash2 size={20} color="#fff" />
+            </TouchableOpacity>
+          </View>
+        ) : (
+          /* ---- MULTIPLE ITEMS: compact grid ---- */
+          <ScrollView
+            contentContainerStyle={{ paddingHorizontal: 24, paddingTop: 16, paddingBottom: 16 }}
+            showsVerticalScrollIndicator={false}
+          >
+            {/* Counter */}
+            <View style={{ alignItems: 'center', marginBottom: 16 }}>
+              <View style={{
+                paddingHorizontal: 14, paddingVertical: 6, borderRadius: 999,
+                backgroundColor: 'rgba(255,255,255,0.12)',
               }}>
-                <Text style={{ color: '#fff', fontSize: 10, fontWeight: '600' }}>
-                  {idx + 1}
+                <Text style={{ color: 'rgba(255,255,255,0.7)', fontSize: 13, fontWeight: '600' }}>
+                  {capturedItems.length}/{MAX_ITEMS} items
                 </Text>
               </View>
             </View>
-          )
-        })}
-      </ScrollView>
 
-        {/* Written text preview */}
-        {writtenText.trim() ? (
-          <View style={{
-            marginHorizontal: 24, marginTop: 12, padding: 14,
-            backgroundColor: 'rgba(255,255,255,0.08)', borderRadius: 16,
-          }}>
-            <Text style={{ color: 'rgba(255,255,255,0.7)', fontSize: 13, lineHeight: 18 }} numberOfLines={3}>
-              {writtenText}
-            </Text>
-          </View>
-        ) : null}
-      </View>
-
-      {/* Quick-add bar + Continue */}
-      <View style={{ paddingHorizontal: 24, paddingBottom: 48, gap: 14 }}>
-        {/* Quick-add: capture row + upload */}
-        {!atItemLimit && (
-          <View style={{ gap: 10 }}>
-            {/* Capture icons */}
-            <View style={{
-              flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 12,
-            }}>
-              {([
-                { type: 'photo' as const, label: 'Photo', icon: Camera, colors: ['#fb7185', '#ec4899'] as [string, string], onPress: quickAddPhoto },
-                { type: 'video' as const, label: 'Video', icon: Video, colors: ['#a78bfa', '#8b5cf6'] as [string, string], onPress: quickAddVideo },
-                { type: 'voice' as const, label: 'Voice', icon: Mic, colors: ['#fbbf24', '#f97316'] as [string, string], onPress: quickAddVoice },
-              ]).map(({ type, label, icon: Icon, colors, onPress }) => (
+            {/* Thumbnail grid */}
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: THUMB_GAP }}>
+              {capturedItems.map((item, idx) => (
                 <TouchableOpacity
-                  key={type}
-                  onPress={onPress}
+                  key={`${item.uri}-${idx}`}
                   activeOpacity={0.8}
-                  style={{ alignItems: 'center', gap: 4 }}
+                  onPress={() => setExpandedIndex(idx)}
+                  style={{ position: 'relative', width: THUMB_SIZE, height: THUMB_SIZE }}
                 >
-                  <LinearGradient
-                    colors={colors}
+                  {renderMediaThumb(item, THUMB_SIZE, 14)}
+
+                  {/* Delete button */}
+                  <TouchableOpacity
+                    onPress={() => removeMediaItem(idx)}
                     style={{
-                      width: 44, height: 44, borderRadius: 14,
+                      position: 'absolute', top: 4, right: 4,
+                      width: 24, height: 24, borderRadius: 12,
+                      backgroundColor: 'rgba(0,0,0,0.6)',
                       alignItems: 'center', justifyContent: 'center',
                     }}
                   >
-                    <Icon size={20} color="#fff" />
-                  </LinearGradient>
-                  <Text style={{ color: 'rgba(255,255,255,0.4)', fontSize: 10 }}>{label}</Text>
+                    <X size={12} color="#fff" />
+                  </TouchableOpacity>
+
+                  {/* Order badge */}
+                  <View style={{
+                    position: 'absolute', bottom: 4, left: 4,
+                    width: 20, height: 20, borderRadius: 10,
+                    backgroundColor: 'rgba(0,0,0,0.5)',
+                    alignItems: 'center', justifyContent: 'center',
+                  }}>
+                    <Text style={{ color: '#fff', fontSize: 10, fontWeight: '700' }}>
+                      {idx + 1}
+                    </Text>
+                  </View>
                 </TouchableOpacity>
               ))}
+            </View>
 
-              {/* Upload from files */}
-              <TouchableOpacity
-                onPress={quickAddUpload}
-                activeOpacity={0.8}
-                style={{ alignItems: 'center', gap: 4 }}
-              >
-                <View style={{
-                  width: 44, height: 44, borderRadius: 14,
-                  backgroundColor: 'rgba(255,255,255,0.15)',
-                  alignItems: 'center', justifyContent: 'center',
-                }}>
-                  <Upload size={20} color="rgba(255,255,255,0.7)" />
-                </View>
-                <Text style={{ color: 'rgba(255,255,255,0.4)', fontSize: 10 }}>Upload</Text>
-              </TouchableOpacity>
+            {/* Written text preview */}
+            {writtenText.trim() ? (
+              <View style={{
+                marginTop: 12, padding: 14,
+                backgroundColor: 'rgba(255,255,255,0.08)', borderRadius: 14,
+              }}>
+                <Text style={{ color: 'rgba(255,255,255,0.7)', fontSize: 13, lineHeight: 18 }} numberOfLines={3}>
+                  {writtenText}
+                </Text>
+              </View>
+            ) : null}
+          </ScrollView>
+        )}
+
+      {/* Bottom bar */}
+      <View style={{ paddingHorizontal: 24, paddingBottom: 48, position: 'relative' }}>
+        {/* Floating add menu */}
+        {showAddMenu && (
+          <View style={{
+            position: 'absolute', bottom: 120, left: 24, right: 24,
+            backgroundColor: 'rgba(30,30,35,0.95)', borderRadius: 20,
+            padding: 16, gap: 12,
+            shadowColor: '#000', shadowOffset: { width: 0, height: -4 },
+            shadowOpacity: 0.3, shadowRadius: 12, elevation: 10,
+          }}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-evenly' }}>
+              {([
+                { label: 'Photo', icon: Camera, colors: ['#fb7185', '#ec4899'] as [string, string], onPress: quickAddPhoto },
+                { label: 'Video', icon: Video, colors: ['#a78bfa', '#8b5cf6'] as [string, string], onPress: quickAddVideo },
+                { label: 'Voice', icon: Mic, colors: ['#fbbf24', '#f97316'] as [string, string], onPress: quickAddVoice },
+                { label: 'Upload', icon: Upload, colors: ['rgba(255,255,255,0.25)', 'rgba(255,255,255,0.15)'] as [string, string], onPress: quickAddUpload },
+              ]).map(({ label, icon: Icon, colors, onPress }) => (
+                <TouchableOpacity
+                  key={label}
+                  onPress={() => { setShowAddMenu(false); onPress() }}
+                  activeOpacity={0.8}
+                  style={{ alignItems: 'center', gap: 6 }}
+                >
+                  <LinearGradient
+                    colors={colors}
+                    style={{ width: 50, height: 50, borderRadius: 16, alignItems: 'center', justifyContent: 'center' }}
+                  >
+                    <Icon size={22} color="#fff" />
+                  </LinearGradient>
+                  <Text style={{ color: 'rgba(255,255,255,0.6)', fontSize: 11 }}>{label}</Text>
+                </TouchableOpacity>
+              ))}
             </View>
           </View>
         )}
 
         {atItemLimit && (
-          <Text style={{ color: '#f97316', textAlign: 'center', fontSize: 13 }}>
+          <Text style={{ color: '#f97316', textAlign: 'center', fontSize: 13, marginBottom: 10 }}>
             Maximum {MAX_ITEMS} items reached
           </Text>
         )}
 
-        {/* Bottom row: trash + continue */}
+        {/* Button row: trash + add + continue */}
         <View style={{
-          flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 12,
+          flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10,
         }}>
           <TouchableOpacity
             onPress={resetCapture}
@@ -684,14 +762,28 @@ export default function CaptureScreen() {
             <Trash2 size={20} color="#fff" />
           </TouchableOpacity>
 
+          {!atItemLimit && (
+            <TouchableOpacity
+              onPress={() => setShowAddMenu(prev => !prev)}
+              style={{
+                width: 48, height: 48, borderRadius: 24,
+                backgroundColor: showAddMenu ? 'rgba(16,185,129,0.3)' : 'rgba(255,255,255,0.15)',
+                alignItems: 'center', justifyContent: 'center',
+              }}
+            >
+              <Plus size={22} color={showAddMenu ? '#34d399' : '#fff'} />
+            </TouchableOpacity>
+          )}
+
           <TouchableOpacity
             onPress={() => {
+              setShowAddMenu(false)
               const nextStep = STEP_DETAILS
               setMaxReachedStep(prev => Math.max(prev, nextStep))
               goToStep(nextStep)
             }}
             activeOpacity={0.8}
-            style={{ flex: 1, maxWidth: 240 }}
+            style={{ flex: 1, maxWidth: 220 }}
           >
             <LinearGradient
               colors={['#34d399', '#14b8a6']}
@@ -707,7 +799,8 @@ export default function CaptureScreen() {
         </View>
       </View>
     </View>
-  )
+    )
+  }
 
   // ============================================
   // RENDER
