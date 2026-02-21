@@ -290,20 +290,28 @@ export default function CaptureScreen() {
   // ============================================
   const quickAddPhoto = () => {
     if (atItemLimit) return
-    Alert.alert('Add Photo', 'Choose a source', [
-      { text: 'Camera', onPress: () => pickPhoto(true) },
-      { text: 'Gallery', onPress: () => pickPhoto(false) },
-      { text: 'Cancel', style: 'cancel' },
-    ])
+    if (Platform.OS === 'web') {
+      pickPhoto(false)
+    } else {
+      Alert.alert('Add Photo', 'Choose a source', [
+        { text: 'Camera', onPress: () => pickPhoto(true) },
+        { text: 'Gallery', onPress: () => pickPhoto(false) },
+        { text: 'Cancel', style: 'cancel' },
+      ])
+    }
   }
 
   const quickAddVideo = () => {
     if (atItemLimit) return
-    Alert.alert('Add Video', 'Choose a source', [
-      { text: 'Record', onPress: () => pickVideo(true) },
-      { text: 'Gallery', onPress: () => pickVideo(false) },
-      { text: 'Cancel', style: 'cancel' },
-    ])
+    if (Platform.OS === 'web') {
+      pickVideo(false)
+    } else {
+      Alert.alert('Add Video', 'Choose a source', [
+        { text: 'Record', onPress: () => pickVideo(true) },
+        { text: 'Gallery', onPress: () => pickVideo(false) },
+        { text: 'Cancel', style: 'cancel' },
+      ])
+    }
   }
 
   const quickAddVoice = () => {
