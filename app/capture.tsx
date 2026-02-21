@@ -498,30 +498,31 @@ export default function CaptureScreen() {
   // PREVIEW STRIP — shows all captured items
   // ============================================
   const PreviewStrip = () => (
-    <View style={{ flex: 1 }}>
-      {/* Counter */}
-      <View style={{ alignItems: 'center', marginTop: 16, marginBottom: 12 }}>
-        <View style={{
-          paddingHorizontal: 14, paddingVertical: 6, borderRadius: 999,
-          backgroundColor: 'rgba(255,255,255,0.12)',
-        }}>
-          <Text style={{ color: 'rgba(255,255,255,0.7)', fontSize: 13, fontWeight: '600' }}>
-            {capturedItems.length}/{MAX_ITEMS} items
-          </Text>
+    <View style={{ flex: 1, justifyContent: 'space-between' }}>
+      {/* Top: counter + items */}
+      <View style={{ flex: 1 }}>
+        {/* Counter */}
+        <View style={{ alignItems: 'center', marginTop: 16, marginBottom: 12 }}>
+          <View style={{
+            paddingHorizontal: 14, paddingVertical: 6, borderRadius: 999,
+            backgroundColor: 'rgba(255,255,255,0.12)',
+          }}>
+            <Text style={{ color: 'rgba(255,255,255,0.7)', fontSize: 13, fontWeight: '600' }}>
+              {capturedItems.length}/{MAX_ITEMS} items
+            </Text>
+          </View>
         </View>
-      </View>
 
-      {/* Items strip */}
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        contentContainerStyle={{
-          paddingHorizontal: 24, gap: 12,
-          alignItems: 'center',
-          flexGrow: 1,
-        }}
-        style={{ maxHeight: 240 }}
-      >
+        {/* Items strip */}
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={{
+            paddingHorizontal: 24, gap: 12,
+            alignItems: 'center',
+          }}
+          style={{ flexGrow: 0 }}
+        >
         {capturedItems.map((item, idx) => {
           const typeIcon = getTypeIcon(item.mimeType)
           const colors = getTypeColors(item.mimeType)
@@ -596,17 +597,18 @@ export default function CaptureScreen() {
         })}
       </ScrollView>
 
-      {/* Written text preview */}
-      {writtenText.trim() ? (
-        <View style={{
-          marginHorizontal: 24, marginTop: 12, padding: 14,
-          backgroundColor: 'rgba(255,255,255,0.08)', borderRadius: 16,
-        }}>
-          <Text style={{ color: 'rgba(255,255,255,0.7)', fontSize: 13, lineHeight: 18 }} numberOfLines={3}>
-            {writtenText}
-          </Text>
-        </View>
-      ) : null}
+        {/* Written text preview */}
+        {writtenText.trim() ? (
+          <View style={{
+            marginHorizontal: 24, marginTop: 12, padding: 14,
+            backgroundColor: 'rgba(255,255,255,0.08)', borderRadius: 16,
+          }}>
+            <Text style={{ color: 'rgba(255,255,255,0.7)', fontSize: 13, lineHeight: 18 }} numberOfLines={3}>
+              {writtenText}
+            </Text>
+          </View>
+        ) : null}
+      </View>
 
       {/* Quick-add bar + Continue */}
       <View style={{ paddingHorizontal: 24, paddingBottom: 48, gap: 14 }}>
