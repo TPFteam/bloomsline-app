@@ -6,7 +6,24 @@ import { Platform } from 'react-native'
 // TYPES
 // ============================================
 
-export type MomentType = 'photo' | 'video' | 'voice' | 'write'
+export type MomentType = 'photo' | 'video' | 'voice' | 'write' | 'mixed'
+
+export interface MediaItem {
+  uri: string
+  mimeType: string
+  durationSeconds?: number
+}
+
+export interface MomentMediaRow {
+  id: string
+  moment_id: string
+  media_url: string
+  mime_type: string
+  duration_seconds: number | null
+  file_size_bytes: number | null
+  sort_order: number
+  created_at: string
+}
 
 export interface Moment {
   id: string
@@ -22,16 +39,15 @@ export interface Moment {
   mime_type: string | null
   created_at: string
   updated_at: string
+  // Multi-media items (populated from moment_media table)
+  media_items?: MomentMediaRow[]
 }
 
 export interface CreateMomentInput {
-  type: MomentType
-  mediaUri?: string
-  mimeType?: string
+  mediaItems: MediaItem[]
   textContent?: string
   caption?: string
   moods: string[]
-  durationSeconds?: number
 }
 
 // ============================================
@@ -43,6 +59,7 @@ async function uploadMomentMedia(
   momentId: string,
   uri: string,
   mimeType: string,
+  index: number = 0,
 ): Promise<{ url: string | null; fileSize: number | null }> {
   // Determine file extension
   let extension = 'bin'
@@ -54,7 +71,7 @@ async function uploadMomentMedia(
     extension = mimeType.split('/')[1] || 'webm'
   }
 
-  const fileName = `media.${extension}`
+  const fileName = `media-${index}.${extension}`
   const filePath = `${userId}/${momentId}/${fileName}`
 
   let fileBody: ArrayBuffer | Blob
@@ -100,6 +117,28 @@ async function uploadMomentMedia(
 }
 
 // ============================================
+// HELPERS
+// ============================================
+
+function deriveMomentType(items: MediaItem[], textContent?: string): MomentType {
+  if (items.length === 0 && textContent) return 'write'
+  if (items.length === 0) return 'write'
+
+  const types = new Set<string>()
+  for (const item of items) {
+    if (item.mimeType.startsWith('image/')) types.add('photo')
+    else if (item.mimeType.startsWith('video/')) types.add('video')
+    else if (item.mimeType.startsWith('audio/')) types.add('voice')
+  }
+
+  // If text + media, or multiple different media types → mixed
+  if (textContent && types.size > 0) return 'mixed'
+  if (types.size > 1) return 'mixed'
+  if (types.size === 1) return [...types][0] as MomentType
+  return 'write'
+}
+
+// ============================================
 // MOMENT OPERATIONS
 // ============================================
 
@@ -112,30 +151,32 @@ export async function createMoment(input: CreateMomentInput): Promise<Moment | n
 
   const momentId = crypto.randomUUID()
 
-  // Upload media if present
-  let mediaUrl: string | null = null
-  let mimeType: string | null = input.mimeType || null
-  let fileSizeBytes: number | null = null
+  // Upload all media items in parallel
+  const uploadResults = await Promise.all(
+    input.mediaItems.map((item, i) =>
+      uploadMomentMedia(user.id, momentId, item.uri, item.mimeType, i)
+    )
+  )
 
-  if (input.mediaUri && input.mimeType) {
-    const result = await uploadMomentMedia(user.id, momentId, input.mediaUri, input.mimeType)
-    mediaUrl = result.url
-    fileSizeBytes = result.fileSize
-  }
+  // Use first item for backward-compat columns on moments table
+  const firstItem = input.mediaItems[0]
+  const firstUpload = uploadResults[0]
+
+  const momentType = deriveMomentType(input.mediaItems, input.textContent)
 
   const { data, error } = await supabase
     .from('moments')
     .insert({
       id: momentId,
       user_id: user.id,
-      type: input.type,
-      media_url: mediaUrl,
+      type: momentType,
+      media_url: firstUpload?.url || null,
       text_content: input.textContent || null,
       caption: input.caption || null,
       moods: input.moods,
-      duration_seconds: input.durationSeconds || null,
-      file_size_bytes: fileSizeBytes,
-      mime_type: mimeType,
+      duration_seconds: firstItem?.durationSeconds || null,
+      file_size_bytes: firstUpload?.fileSize || null,
+      mime_type: firstItem?.mimeType || null,
     })
     .select()
     .single()
@@ -143,6 +184,26 @@ export async function createMoment(input: CreateMomentInput): Promise<Moment | n
   if (error) {
     console.error('Error creating moment:', error)
     return null
+  }
+
+  // Batch-insert into moment_media for ALL items (including first, for consistent querying)
+  if (input.mediaItems.length > 0) {
+    const mediaRows = input.mediaItems.map((item, i) => ({
+      moment_id: momentId,
+      media_url: uploadResults[i]?.url || '',
+      mime_type: item.mimeType,
+      duration_seconds: item.durationSeconds || null,
+      file_size_bytes: uploadResults[i]?.fileSize || null,
+      sort_order: i,
+    }))
+
+    const { error: mediaError } = await supabase
+      .from('moment_media')
+      .insert(mediaRows)
+
+    if (mediaError) {
+      console.error('Error inserting moment_media rows:', mediaError)
+    }
   }
 
   return data as Moment
@@ -169,14 +230,37 @@ export async function getMemberMoments(limit = 50, offset = 0, sinceDate?: Date)
     return []
   }
 
-  return data as Moment[]
+  const moments = data as Moment[]
+
+  // Fetch media items for all moments that may have multiple
+  if (moments.length > 0) {
+    const momentIds = moments.map(m => m.id)
+    const { data: mediaData } = await supabase
+      .from('moment_media')
+      .select('*')
+      .in('moment_id', momentIds)
+      .order('sort_order', { ascending: true })
+
+    if (mediaData) {
+      const mediaByMoment = new Map<string, MomentMediaRow[]>()
+      for (const row of mediaData as MomentMediaRow[]) {
+        if (!mediaByMoment.has(row.moment_id)) mediaByMoment.set(row.moment_id, [])
+        mediaByMoment.get(row.moment_id)!.push(row)
+      }
+      for (const moment of moments) {
+        moment.media_items = mediaByMoment.get(moment.id) || []
+      }
+    }
+  }
+
+  return moments
 }
 
 export async function deleteMoment(momentId: string): Promise<boolean> {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return false
 
-  // Delete media from storage
+  // Delete media from storage (lists all files in the moment folder)
   const mediaPath = `${user.id}/${momentId}`
   const { data: files } = await supabase.storage
     .from('moments_media')
@@ -187,6 +271,7 @@ export async function deleteMoment(momentId: string): Promise<boolean> {
     await supabase.storage.from('moments_media').remove(filesToDelete)
   }
 
+  // moment_media rows are cascade-deleted via FK
   const { error } = await supabase
     .from('moments')
     .delete()

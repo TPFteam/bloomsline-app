@@ -3,6 +3,7 @@ import {
   View,
   Text,
   ScrollView,
+  FlatList,
   RefreshControl,
   TouchableOpacity,
   ActivityIndicator,
@@ -15,6 +16,8 @@ import {
   TextInput,
   KeyboardAvoidingView,
   Platform,
+  NativeSyntheticEvent,
+  NativeScrollEvent,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { LinearGradient } from 'expo-linear-gradient'
@@ -46,7 +49,7 @@ import {
   VolumeX,
 } from 'lucide-react-native'
 import { useAuth } from '@/lib/auth-context'
-import { getMemberMoments, deleteMoment, type Moment } from '@/lib/services/moments'
+import { getMemberMoments, deleteMoment, type Moment, type MomentMediaRow } from '@/lib/services/moments'
 import { useBloomChat, type BloomMessage } from '@/lib/hooks/useBloomChat'
 import { getUserPreferences, updateUserPreferences } from '@/lib/services/preferences'
 import EmotionAnalyticsModal from '@/components/analytics/EmotionAnalyticsModal'
@@ -1136,6 +1139,18 @@ function CalendarView({
                         </Text>
                       </View>
                     )}
+                    {/* Multi-media badge */}
+                    {(m.media_items?.length ?? 0) > 1 && (
+                      <View style={{
+                        position: 'absolute', top: 6, right: 6,
+                        paddingHorizontal: 6, paddingVertical: 2, borderRadius: 999,
+                        backgroundColor: 'rgba(0,0,0,0.55)',
+                      }}>
+                        <Text style={{ color: '#fff', fontSize: 9, fontWeight: '700' }}>
+                          +{(m.media_items?.length ?? 1) - 1}
+                        </Text>
+                      </View>
+                    )}
                     <View style={{ padding: 8 }}>
                       <Text style={{ fontSize: 11, color: theme.textFaint }}>
                         {new Date(m.created_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
@@ -1402,6 +1417,19 @@ function MasonryCard({
         </LinearGradient>
       )}
 
+      {/* Multi-media count badge */}
+      {(m.media_items?.length ?? 0) > 1 && (
+        <View style={{
+          position: 'absolute', top: 8, right: 8,
+          paddingHorizontal: 7, paddingVertical: 3, borderRadius: 999,
+          backgroundColor: 'rgba(0,0,0,0.55)',
+        }}>
+          <Text style={{ color: '#fff', fontSize: 10, fontWeight: '700' }}>
+            +{(m.media_items?.length ?? 1) - 1}
+          </Text>
+        </View>
+      )}
+
       {/* Mood color strip + time */}
       <View style={{
         flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
@@ -1534,6 +1562,139 @@ function VideoPlayer({ uri }: { uri: string }) {
           </>
         )}
       </Pressable>
+    </View>
+  )
+}
+
+// ============================================
+// Moment Media Carousel (for multi-media detail view)
+// ============================================
+
+function MomentMediaCarousel({
+  moment,
+  isDark,
+  theme,
+}: {
+  moment: Moment
+  isDark: boolean
+  theme: Record<string, string>
+}) {
+  const [activeIndex, setActiveIndex] = useState(0)
+  const mediaItems = moment.media_items || []
+  const hasMultiple = mediaItems.length > 1
+
+  const handleScroll = useCallback((e: NativeSyntheticEvent<NativeScrollEvent>) => {
+    const page = Math.round(e.nativeEvent.contentOffset.x / SCREEN_WIDTH)
+    setActiveIndex(page)
+  }, [])
+
+  // Single media or no moment_media rows — render legacy behavior
+  if (mediaItems.length <= 1) {
+    if (moment.type === 'photo' && moment.media_url) {
+      return (
+        <Image
+          source={{ uri: moment.media_url }}
+          style={{ width: '100%', aspectRatio: 1 }}
+          resizeMode="contain"
+        />
+      )
+    }
+    if (moment.type === 'video' && moment.media_url) {
+      return <VideoPlayer uri={moment.media_url} />
+    }
+    if (moment.type === 'voice' && moment.media_url) {
+      return (
+        <LinearGradient
+          colors={[theme.voiceGrad1, theme.voiceGrad2]}
+          style={{ width: '100%', height: 120, alignItems: 'center', justifyContent: 'center' }}
+        >
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3 }}>
+            {Array.from({ length: 12 }).map((_, i) => (
+              <View key={i} style={{
+                width: 3, borderRadius: 2,
+                height: getWaveformHeight(i),
+                backgroundColor: theme.voiceBar,
+              }} />
+            ))}
+          </View>
+          {moment.duration_seconds != null && (
+            <Text style={{ fontSize: 13, color: theme.textMuted, marginTop: 8 }}>
+              {Math.floor(moment.duration_seconds / 60)}:{String(moment.duration_seconds % 60).padStart(2, '0')}
+            </Text>
+          )}
+        </LinearGradient>
+      )
+    }
+    // Write type or no media — nothing to render here
+    return null
+  }
+
+  // Multiple media items — carousel
+  const renderMediaItem = ({ item }: { item: MomentMediaRow }) => {
+    const isImage = item.mime_type.startsWith('image/')
+    const isVideo = item.mime_type.startsWith('video/')
+    const isAudio = item.mime_type.startsWith('audio/')
+
+    return (
+      <View style={{ width: SCREEN_WIDTH }}>
+        {isImage && (
+          <Image
+            source={{ uri: item.media_url }}
+            style={{ width: SCREEN_WIDTH, aspectRatio: 1 }}
+            resizeMode="contain"
+          />
+        )}
+        {isVideo && <VideoPlayer uri={item.media_url} />}
+        {isAudio && (
+          <LinearGradient
+            colors={[theme.voiceGrad1, theme.voiceGrad2]}
+            style={{ width: SCREEN_WIDTH, height: 160, alignItems: 'center', justifyContent: 'center' }}
+          >
+            <Mic size={40} color={theme.voicePlayIcon} />
+            {item.duration_seconds != null && (
+              <Text style={{ fontSize: 14, color: theme.textMuted, marginTop: 8 }}>
+                {Math.floor(item.duration_seconds / 60)}:{String(item.duration_seconds % 60).padStart(2, '0')}
+              </Text>
+            )}
+          </LinearGradient>
+        )}
+      </View>
+    )
+  }
+
+  return (
+    <View>
+      <FlatList
+        data={mediaItems}
+        keyExtractor={(item) => item.id}
+        renderItem={renderMediaItem}
+        horizontal
+        pagingEnabled
+        showsHorizontalScrollIndicator={false}
+        onMomentumScrollEnd={handleScroll}
+        scrollEventThrottle={16}
+      />
+      {/* Page dots */}
+      {hasMultiple && (
+        <View style={{
+          flexDirection: 'row', justifyContent: 'center', alignItems: 'center',
+          gap: 6, paddingVertical: 10,
+        }}>
+          {mediaItems.map((_, i) => (
+            <View
+              key={i}
+              style={{
+                width: activeIndex === i ? 18 : 6,
+                height: 6,
+                borderRadius: 3,
+                backgroundColor: activeIndex === i
+                  ? '#10b981'
+                  : (isDark ? 'rgba(255,255,255,0.2)' : 'rgba(0,0,0,0.15)'),
+              }}
+            />
+          ))}
+        </View>
+      )}
     </View>
   )
 }
@@ -1920,16 +2081,7 @@ export default function MomentsScreen() {
 
                 {/* Content */}
                 <ScrollView style={{ maxHeight: 500 }}>
-                  {selectedMoment.type === 'photo' && selectedMoment.media_url && (
-                    <Image
-                      source={{ uri: selectedMoment.media_url }}
-                      style={{ width: '100%', aspectRatio: 1 }}
-                      resizeMode="contain"
-                    />
-                  )}
-                  {selectedMoment.type === 'video' && selectedMoment.media_url && (
-                    <VideoPlayer uri={selectedMoment.media_url} />
-                  )}
+                  <MomentMediaCarousel moment={selectedMoment} isDark={isDark} theme={theme} />
 
                   <View style={{ padding: 20, gap: 16 }}>
                     {selectedMoment.text_content && (

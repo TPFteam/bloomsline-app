@@ -38,10 +38,13 @@ import {
   Send,
   MicOff,
   ChevronLeft,
+  Plus,
+  Play,
 } from 'lucide-react-native'
-import { createMoment } from '@/lib/services/moments'
+import { createMoment, type MediaItem } from '@/lib/services/moments'
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window')
+const MAX_ITEMS = 7
 
 type CaptureType = 'photo' | 'video' | 'voice' | 'write'
 
@@ -108,6 +111,18 @@ const captureTypes: {
   },
 ]
 
+function getTypeIcon(mimeType: string) {
+  if (mimeType.startsWith('image/')) return 'photo'
+  if (mimeType.startsWith('video/')) return 'video'
+  if (mimeType.startsWith('audio/')) return 'voice'
+  return 'write'
+}
+
+function getTypeColors(mimeType: string): [string, string] {
+  const type = getTypeIcon(mimeType)
+  return captureTypes.find(t => t.id === type)?.colors || ['#a3a3a3', '#737373']
+}
+
 // ============================================
 // MAIN COMPONENT
 // ============================================
@@ -123,12 +138,9 @@ export default function CaptureScreen() {
   // State
   const [captureType, setCaptureType] = useState<CaptureType | null>(null)
 
-  // Captured content
-  const [capturedImageUri, setCapturedImageUri] = useState<string | null>(null)
-  const [capturedVideoUri, setCapturedVideoUri] = useState<string | null>(null)
-  const [capturedAudioUri, setCapturedAudioUri] = useState<string | null>(null)
+  // Multi-media captured items
+  const [capturedItems, setCapturedItems] = useState<MediaItem[]>([])
   const [writtenText, setWrittenText] = useState('')
-  const [mediaMimeType, setMediaMimeType] = useState<string | null>(null)
 
   // Details
   const [selectedMoods, setSelectedMoods] = useState<string[]>([])
@@ -141,6 +153,9 @@ export default function CaptureScreen() {
   const [recordingTime, setRecordingTime] = useState(0)
   const playerRef = useRef<ReturnType<typeof createAudioPlayer> | null>(null)
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  // Track the duration of the current recording for the audio item
+  const currentRecordingTimeRef = useRef(0)
 
   // Cleanup
   useEffect(() => {
@@ -155,6 +170,8 @@ export default function CaptureScreen() {
     const secs = seconds % 60
     return `${mins}:${secs.toString().padStart(2, '0')}`
   }
+
+  const atItemLimit = capturedItems.length >= MAX_ITEMS
 
   // ============================================
   // PAGER NAVIGATION
@@ -181,9 +198,32 @@ export default function CaptureScreen() {
   // ============================================
   const handleTypeSelect = (type: CaptureType) => {
     setCaptureType(type)
+    // For 'write' type, skip capture and go directly to write in capture step
     const nextStep = STEP_CAPTURE
     setMaxReachedStep(prev => Math.max(prev, nextStep))
     goToStep(nextStep)
+  }
+
+  // ============================================
+  // ADD ITEM HELPER
+  // ============================================
+  const addMediaItem = (item: MediaItem) => {
+    setCapturedItems(prev => [...prev, item])
+    const nextStep = STEP_PREVIEW
+    setMaxReachedStep(prev => Math.max(prev, nextStep))
+    goToStep(nextStep)
+  }
+
+  const removeMediaItem = (index: number) => {
+    setCapturedItems(prev => prev.filter((_, i) => i !== index))
+  }
+
+  // ============================================
+  // "ADD MORE" — loop back to type selection
+  // ============================================
+  const handleAddMore = () => {
+    setCaptureType(null)
+    goToStep(STEP_SELECT)
   }
 
   // ============================================
@@ -211,11 +251,10 @@ export default function CaptureScreen() {
 
     if (!result.canceled && result.assets[0]) {
       const asset = result.assets[0]
-      setCapturedImageUri(asset.uri)
-      setMediaMimeType(asset.mimeType || 'image/jpeg')
-      const nextStep = STEP_PREVIEW
-      setMaxReachedStep(prev => Math.max(prev, nextStep))
-      goToStep(nextStep)
+      addMediaItem({
+        uri: asset.uri,
+        mimeType: asset.mimeType || 'image/jpeg',
+      })
     }
   }
 
@@ -248,11 +287,10 @@ export default function CaptureScreen() {
         Alert.alert('Too large', 'Video must be under 30MB.')
         return
       }
-      setCapturedVideoUri(asset.uri)
-      setMediaMimeType(asset.mimeType || 'video/mp4')
-      const nextStep = STEP_PREVIEW
-      setMaxReachedStep(prev => Math.max(prev, nextStep))
-      goToStep(nextStep)
+      addMediaItem({
+        uri: asset.uri,
+        mimeType: asset.mimeType || 'video/mp4',
+      })
     }
   }
 
@@ -275,9 +313,14 @@ export default function CaptureScreen() {
       recorder.record()
       setIsRecording(true)
       setRecordingTime(0)
+      currentRecordingTimeRef.current = 0
 
       timerRef.current = setInterval(() => {
-        setRecordingTime(prev => prev + 1)
+        setRecordingTime(prev => {
+          const next = prev + 1
+          currentRecordingTimeRef.current = next
+          return next
+        })
       }, 1000)
     } catch (err) {
       console.error('Error starting recording:', err)
@@ -298,22 +341,21 @@ export default function CaptureScreen() {
       const uri = recorder.uri
 
       if (uri) {
-        setCapturedAudioUri(uri)
-        setMediaMimeType('audio/m4a')
-        const nextStep = STEP_PREVIEW
-        setMaxReachedStep(prev => Math.max(prev, nextStep))
-        goToStep(nextStep)
+        addMediaItem({
+          uri,
+          mimeType: 'audio/m4a',
+          durationSeconds: currentRecordingTimeRef.current,
+        })
       }
     } catch (err) {
       console.error('Error stopping recording:', err)
     }
   }
 
-  const playAudioPreview = async () => {
-    if (!capturedAudioUri) return
+  const playAudioPreview = async (uri: string) => {
     if (playerRef.current) playerRef.current.release()
 
-    const player = createAudioPlayer(capturedAudioUri)
+    const player = createAudioPlayer(uri)
     playerRef.current = player
     player.play()
   }
@@ -331,32 +373,14 @@ export default function CaptureScreen() {
   // SAVE
   // ============================================
   const handleSave = async () => {
-    if (!captureType) return
     setSaving(true)
 
     try {
-      let mediaUri: string | undefined
-      let mimeType: string | undefined
-
-      if (captureType === 'photo' && capturedImageUri) {
-        mediaUri = capturedImageUri
-        mimeType = mediaMimeType || 'image/jpeg'
-      } else if (captureType === 'video' && capturedVideoUri) {
-        mediaUri = capturedVideoUri
-        mimeType = mediaMimeType || 'video/mp4'
-      } else if (captureType === 'voice' && capturedAudioUri) {
-        mediaUri = capturedAudioUri
-        mimeType = mediaMimeType || 'audio/m4a'
-      }
-
       const result = await createMoment({
-        type: captureType,
-        mediaUri,
-        mimeType,
-        textContent: captureType === 'write' ? writtenText : undefined,
+        mediaItems: capturedItems,
+        textContent: writtenText || undefined,
         caption: caption || undefined,
         moods: selectedMoods,
-        durationSeconds: captureType === 'voice' ? recordingTime : undefined,
       })
 
       if (result) {
@@ -380,20 +404,19 @@ export default function CaptureScreen() {
   // RESET
   // ============================================
   const resetCapture = () => {
-    setCapturedImageUri(null)
-    setCapturedVideoUri(null)
-    setCapturedAudioUri(null)
+    setCapturedItems([])
     setWrittenText('')
     setSelectedMoods([])
     setCaption('')
     setRecordingTime(0)
     setCaptureType(null)
-    setMediaMimeType(null)
     setMaxReachedStep(0)
     goToStep(STEP_SELECT)
   }
 
   const currentType = captureTypes.find(t => t.id === captureType)
+
+  const hasContent = capturedItems.length > 0 || writtenText.trim().length > 0
 
   // ============================================
   // STEP INDICATOR
@@ -434,6 +457,176 @@ export default function CaptureScreen() {
   )
 
   // ============================================
+  // PREVIEW STRIP — shows all captured items
+  // ============================================
+  const PreviewStrip = () => (
+    <View style={{ flex: 1 }}>
+      {/* Counter */}
+      <View style={{ alignItems: 'center', marginTop: 16, marginBottom: 12 }}>
+        <View style={{
+          paddingHorizontal: 14, paddingVertical: 6, borderRadius: 999,
+          backgroundColor: 'rgba(255,255,255,0.12)',
+        }}>
+          <Text style={{ color: 'rgba(255,255,255,0.7)', fontSize: 13, fontWeight: '600' }}>
+            {capturedItems.length}/{MAX_ITEMS} items
+          </Text>
+        </View>
+      </View>
+
+      {/* Items strip */}
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={{
+          paddingHorizontal: 24, gap: 12,
+          alignItems: 'center',
+          flexGrow: 1,
+        }}
+        style={{ maxHeight: 240 }}
+      >
+        {capturedItems.map((item, idx) => {
+          const typeIcon = getTypeIcon(item.mimeType)
+          const colors = getTypeColors(item.mimeType)
+
+          return (
+            <View key={`${item.uri}-${idx}`} style={{ position: 'relative' }}>
+              {typeIcon === 'photo' ? (
+                <Image
+                  source={{ uri: item.uri }}
+                  style={{
+                    width: 140, height: 180, borderRadius: 16,
+                  }}
+                  resizeMode="cover"
+                />
+              ) : (
+                <LinearGradient
+                  colors={colors}
+                  style={{
+                    width: 140, height: 180, borderRadius: 16,
+                    alignItems: 'center', justifyContent: 'center',
+                  }}
+                >
+                  {typeIcon === 'video' && <Video size={36} color="#fff" />}
+                  {typeIcon === 'voice' && (
+                    <TouchableOpacity onPress={() => playAudioPreview(item.uri)}>
+                      <View style={{ alignItems: 'center', gap: 8 }}>
+                        <Mic size={36} color="#fff" />
+                        {item.durationSeconds != null && (
+                          <Text style={{ color: 'rgba(255,255,255,0.8)', fontSize: 13 }}>
+                            {formatTime(item.durationSeconds)}
+                          </Text>
+                        )}
+                        <View style={{
+                          flexDirection: 'row', alignItems: 'center', gap: 4,
+                          paddingHorizontal: 12, paddingVertical: 6, borderRadius: 999,
+                          backgroundColor: 'rgba(255,255,255,0.2)',
+                        }}>
+                          <Play size={12} color="#fff" />
+                          <Text style={{ color: '#fff', fontSize: 11 }}>Play</Text>
+                        </View>
+                      </View>
+                    </TouchableOpacity>
+                  )}
+                </LinearGradient>
+              )}
+
+              {/* Delete button */}
+              <TouchableOpacity
+                onPress={() => removeMediaItem(idx)}
+                style={{
+                  position: 'absolute', top: 6, right: 6,
+                  width: 28, height: 28, borderRadius: 14,
+                  backgroundColor: 'rgba(0,0,0,0.6)',
+                  alignItems: 'center', justifyContent: 'center',
+                }}
+              >
+                <X size={14} color="#fff" />
+              </TouchableOpacity>
+
+              {/* Sort order badge */}
+              <View style={{
+                position: 'absolute', bottom: 6, left: 6,
+                paddingHorizontal: 8, paddingVertical: 3, borderRadius: 999,
+                backgroundColor: 'rgba(0,0,0,0.5)',
+              }}>
+                <Text style={{ color: '#fff', fontSize: 10, fontWeight: '600' }}>
+                  {idx + 1}
+                </Text>
+              </View>
+            </View>
+          )
+        })}
+      </ScrollView>
+
+      {/* Written text preview */}
+      {writtenText.trim() ? (
+        <View style={{
+          marginHorizontal: 24, marginTop: 12, padding: 14,
+          backgroundColor: 'rgba(255,255,255,0.08)', borderRadius: 16,
+        }}>
+          <Text style={{ color: 'rgba(255,255,255,0.7)', fontSize: 13, lineHeight: 18 }} numberOfLines={3}>
+            {writtenText}
+          </Text>
+        </View>
+      ) : null}
+
+      {/* Action buttons at bottom */}
+      <View style={{
+        padding: 24, paddingBottom: 48,
+        flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 12,
+      }}>
+        <TouchableOpacity
+          onPress={resetCapture}
+          style={{
+            width: 48, height: 48, borderRadius: 24,
+            backgroundColor: 'rgba(255,255,255,0.15)',
+            alignItems: 'center', justifyContent: 'center',
+          }}
+        >
+          <Trash2 size={20} color="#fff" />
+        </TouchableOpacity>
+
+        {!atItemLimit && (
+          <TouchableOpacity
+            onPress={handleAddMore}
+            activeOpacity={0.8}
+            style={{
+              flexDirection: 'row', alignItems: 'center', gap: 6,
+              paddingHorizontal: 20, paddingVertical: 14,
+              backgroundColor: 'rgba(255,255,255,0.15)',
+              borderRadius: 999,
+            }}
+          >
+            <Plus size={18} color="#fff" />
+            <Text style={{ color: '#fff', fontWeight: '600', fontSize: 14 }}>Add more</Text>
+          </TouchableOpacity>
+        )}
+
+        <TouchableOpacity
+          onPress={() => {
+            const nextStep = STEP_DETAILS
+            setMaxReachedStep(prev => Math.max(prev, nextStep))
+            goToStep(nextStep)
+          }}
+          activeOpacity={0.8}
+          style={{ flex: 1, maxWidth: 200 }}
+        >
+          <LinearGradient
+            colors={['#34d399', '#14b8a6']}
+            style={{
+              height: 48, borderRadius: 24,
+              flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
+            }}
+          >
+            <Sparkles size={18} color="#fff" />
+            <Text style={{ color: '#fff', fontWeight: '600', fontSize: 15 }}>Continue</Text>
+          </LinearGradient>
+        </TouchableOpacity>
+      </View>
+    </View>
+  )
+
+  // ============================================
   // RENDER
   // ============================================
   return (
@@ -448,6 +641,9 @@ export default function CaptureScreen() {
             onPress={() => {
               if (currentStep === STEP_SELECT) {
                 router.canDismiss() ? router.dismiss() : router.replace('/(tabs)')
+              } else if (currentStep === STEP_CAPTURE && capturedItems.length > 0) {
+                // If we have items, go back to preview instead of type select
+                goToStep(STEP_PREVIEW)
               } else {
                 goToStep(currentStep - 1)
               }
@@ -464,11 +660,23 @@ export default function CaptureScreen() {
             }
           </TouchableOpacity>
 
-          <Text style={{ color: '#ffffff', fontSize: 16, fontWeight: '500' }}>
-            {currentStep === STEP_SELECT
-              ? 'New Moment'
-              : currentType?.label || ''}
-          </Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            <Text style={{ color: '#ffffff', fontSize: 16, fontWeight: '500' }}>
+              {currentStep === STEP_SELECT
+                ? 'New Moment'
+                : currentType?.label || ''}
+            </Text>
+            {capturedItems.length > 0 && (
+              <View style={{
+                paddingHorizontal: 8, paddingVertical: 3, borderRadius: 999,
+                backgroundColor: 'rgba(16,185,129,0.3)',
+              }}>
+                <Text style={{ color: '#34d399', fontSize: 11, fontWeight: '700' }}>
+                  {capturedItems.length}/{MAX_ITEMS}
+                </Text>
+              </View>
+            )}
+          </View>
 
           <View style={{ width: 40 }} />
         </View>
@@ -492,7 +700,9 @@ export default function CaptureScreen() {
           <View style={{ width: SCREEN_WIDTH, flex: 1 }}>
             <View style={{ flex: 1, padding: 24 }}>
               <Text style={{ color: 'rgba(255,255,255,0.5)', textAlign: 'center', marginBottom: 32, fontSize: 15 }}>
-                How would you like to capture this moment?
+                {capturedItems.length > 0
+                  ? 'Add another item to your moment'
+                  : 'How would you like to capture this moment?'}
               </Text>
 
               <View style={{ gap: 14, width: '100%', maxWidth: 340, alignSelf: 'center' }}>
@@ -501,17 +711,18 @@ export default function CaptureScreen() {
                   {captureTypes.slice(0, 2).map((type) => (
                     <TouchableOpacity
                       key={type.id}
-                      onPress={() => handleTypeSelect(type.id)}
-                      activeOpacity={0.8}
+                      onPress={() => !atItemLimit && handleTypeSelect(type.id)}
+                      activeOpacity={atItemLimit ? 1 : 0.8}
                       style={{
                         flex: 1,
-                        backgroundColor: captureType === type.id ? 'rgba(255,255,255,0.15)' : 'rgba(255,255,255,0.08)',
+                        backgroundColor: atItemLimit ? 'rgba(255,255,255,0.04)' : captureType === type.id ? 'rgba(255,255,255,0.15)' : 'rgba(255,255,255,0.08)',
                         borderRadius: 24,
                         padding: 20,
                         alignItems: 'center',
                         gap: 10,
                         borderWidth: captureType === type.id ? 2 : 1,
                         borderColor: captureType === type.id ? type.colors[0] : 'rgba(255,255,255,0.08)',
+                        opacity: atItemLimit ? 0.4 : 1,
                       }}
                     >
                       <LinearGradient
@@ -531,17 +742,18 @@ export default function CaptureScreen() {
                   {captureTypes.slice(2, 4).map((type) => (
                     <TouchableOpacity
                       key={type.id}
-                      onPress={() => handleTypeSelect(type.id)}
-                      activeOpacity={0.8}
+                      onPress={() => !atItemLimit && handleTypeSelect(type.id)}
+                      activeOpacity={atItemLimit ? 1 : 0.8}
                       style={{
                         flex: 1,
-                        backgroundColor: captureType === type.id ? 'rgba(255,255,255,0.15)' : 'rgba(255,255,255,0.08)',
+                        backgroundColor: atItemLimit ? 'rgba(255,255,255,0.04)' : captureType === type.id ? 'rgba(255,255,255,0.15)' : 'rgba(255,255,255,0.08)',
                         borderRadius: 24,
                         padding: 20,
                         alignItems: 'center',
                         gap: 10,
                         borderWidth: captureType === type.id ? 2 : 1,
                         borderColor: captureType === type.id ? type.colors[0] : 'rgba(255,255,255,0.08)',
+                        opacity: atItemLimit ? 0.4 : 1,
                       }}
                     >
                       <LinearGradient
@@ -557,6 +769,36 @@ export default function CaptureScreen() {
                   ))}
                 </View>
               </View>
+
+              {/* At limit notice */}
+              {atItemLimit && (
+                <Text style={{ color: '#f97316', textAlign: 'center', marginTop: 24, fontSize: 13 }}>
+                  Maximum {MAX_ITEMS} items reached
+                </Text>
+              )}
+
+              {/* If items exist, show shortcut to continue */}
+              {capturedItems.length > 0 && !atItemLimit && (
+                <TouchableOpacity
+                  onPress={() => {
+                    const nextStep = STEP_PREVIEW
+                    setMaxReachedStep(prev => Math.max(prev, nextStep))
+                    goToStep(nextStep)
+                  }}
+                  activeOpacity={0.8}
+                  style={{ alignSelf: 'center', marginTop: 24 }}
+                >
+                  <View style={{
+                    flexDirection: 'row', alignItems: 'center', gap: 6,
+                    paddingHorizontal: 20, paddingVertical: 12,
+                    backgroundColor: 'rgba(255,255,255,0.1)', borderRadius: 999,
+                  }}>
+                    <Text style={{ color: 'rgba(255,255,255,0.7)', fontSize: 14, fontWeight: '500' }}>
+                      Skip to preview ({capturedItems.length} item{capturedItems.length !== 1 ? 's' : ''})
+                    </Text>
+                  </View>
+                </TouchableOpacity>
+              )}
             </View>
           </View>
 
@@ -767,7 +1009,7 @@ export default function CaptureScreen() {
 
                     <TouchableOpacity
                       onPress={() => {
-                        const nextStep = STEP_DETAILS
+                        const nextStep = capturedItems.length > 0 ? STEP_PREVIEW : STEP_DETAILS
                         setMaxReachedStep(prev => Math.max(prev, nextStep))
                         goToStep(nextStep)
                       }}
@@ -803,107 +1045,13 @@ export default function CaptureScreen() {
 
           {/* ====== PAGE 2: PREVIEW ====== */}
           <View style={{ width: SCREEN_WIDTH, flex: 1 }}>
-            {/* Photo preview */}
-            {captureType === 'photo' && capturedImageUri && (
-              <View style={{ flex: 1 }}>
-                <Image
-                  source={{ uri: capturedImageUri }}
-                  style={{ flex: 1 }}
-                  resizeMode="cover"
-                />
-                <LinearGradient
-                  colors={['transparent', 'rgba(0,0,0,0.6)']}
-                  style={{ position: 'absolute', left: 0, right: 0, bottom: 0, height: 200 }}
-                />
-              </View>
-            )}
-
-            {/* Video preview */}
-            {captureType === 'video' && capturedVideoUri && (
-              <View style={{ flex: 1, backgroundColor: '#000', alignItems: 'center', justifyContent: 'center' }}>
-                <LinearGradient
-                  colors={['#a78bfa', '#8b5cf6']}
-                  style={{ width: 128, height: 128, borderRadius: 64, alignItems: 'center', justifyContent: 'center' }}
-                >
-                  <Video size={64} color="#fff" />
-                </LinearGradient>
-                <Text style={{ color: '#fff', fontSize: 18, fontWeight: '600', marginTop: 16 }}>Video recorded</Text>
-              </View>
-            )}
-
-            {/* Audio preview */}
-            {captureType === 'voice' && capturedAudioUri && (
-              <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 }}>
-                <LinearGradient
-                  colors={['#fbbf24', '#f97316']}
-                  style={{ width: 128, height: 128, borderRadius: 64, alignItems: 'center', justifyContent: 'center', marginBottom: 24 }}
-                >
-                  <Mic size={64} color="#fff" />
-                </LinearGradient>
-                <Text style={{ color: '#fff', fontSize: 20, fontWeight: '600', marginBottom: 8 }}>Voice Note</Text>
-                <Text style={{ color: 'rgba(255,255,255,0.5)', marginBottom: 24 }}>{formatTime(recordingTime)}</Text>
-
-                <TouchableOpacity
-                  onPress={playAudioPreview}
-                  activeOpacity={0.8}
-                  style={{
-                    paddingHorizontal: 24, paddingVertical: 12,
-                    backgroundColor: 'rgba(255,255,255,0.15)',
-                    borderRadius: 999,
-                  }}
-                >
-                  <Text style={{ color: '#fff', fontWeight: '500' }}>Play preview</Text>
-                </TouchableOpacity>
-              </View>
-            )}
-
-            {/* Placeholder */}
-            {!(capturedImageUri || capturedVideoUri || capturedAudioUri) && (
+            {hasContent ? (
+              <PreviewStrip />
+            ) : (
               <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
                 <Text style={{ color: 'rgba(255,255,255,0.3)', fontSize: 15 }}>
                   Swipe back to capture something
                 </Text>
-              </View>
-            )}
-
-            {/* Action buttons at bottom */}
-            {(capturedImageUri || capturedVideoUri || capturedAudioUri) && (
-              <View style={{
-                position: 'absolute', bottom: 0, left: 0, right: 0,
-                padding: 24, paddingBottom: 48,
-                flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 16,
-              }}>
-                <TouchableOpacity
-                  onPress={resetCapture}
-                  style={{
-                    width: 56, height: 56, borderRadius: 28,
-                    backgroundColor: 'rgba(255,255,255,0.2)',
-                    alignItems: 'center', justifyContent: 'center',
-                  }}
-                >
-                  <Trash2 size={24} color="#fff" />
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  onPress={() => {
-                    const nextStep = STEP_DETAILS
-                    setMaxReachedStep(prev => Math.max(prev, nextStep))
-                    goToStep(nextStep)
-                  }}
-                  activeOpacity={0.8}
-                  style={{ flex: 1, maxWidth: 280 }}
-                >
-                  <LinearGradient
-                    colors={['#34d399', '#14b8a6']}
-                    style={{
-                      height: 56, borderRadius: 28,
-                      flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
-                    }}
-                  >
-                    <Sparkles size={20} color="#fff" />
-                    <Text style={{ color: '#fff', fontWeight: '600', fontSize: 16 }}>Continue</Text>
-                  </LinearGradient>
-                </TouchableOpacity>
               </View>
             )}
           </View>
@@ -929,61 +1077,62 @@ export default function CaptureScreen() {
                 keyboardShouldPersistTaps="handled"
                 nestedScrollEnabled
               >
-                {/* Media thumbnail + info */}
-                <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 16, marginBottom: 24 }}>
-                  {captureType === 'photo' && capturedImageUri && (
-                    <Image
-                      source={{ uri: capturedImageUri }}
-                      style={{ width: 80, height: 80, borderRadius: 16 }}
-                      resizeMode="cover"
-                    />
-                  )}
-                  {captureType === 'video' && (
-                    <LinearGradient
-                      colors={['#a78bfa', '#8b5cf6']}
-                      style={{ width: 80, height: 80, borderRadius: 16, alignItems: 'center', justifyContent: 'center' }}
-                    >
-                      <Video size={32} color="#fff" />
-                    </LinearGradient>
-                  )}
-                  {captureType === 'voice' && (
-                    <LinearGradient
-                      colors={['#fbbf24', '#f97316']}
-                      style={{ width: 80, height: 80, borderRadius: 16, alignItems: 'center', justifyContent: 'center' }}
-                    >
-                      <Mic size={32} color="#fff" />
-                    </LinearGradient>
-                  )}
-                  {captureType === 'write' && (
+                {/* Media thumbnails strip */}
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={{ gap: 10, marginBottom: 24 }}
+                >
+                  {capturedItems.map((item, idx) => {
+                    const typeIcon = getTypeIcon(item.mimeType)
+                    const colors = getTypeColors(item.mimeType)
+
+                    return typeIcon === 'photo' ? (
+                      <Image
+                        key={`${item.uri}-${idx}`}
+                        source={{ uri: item.uri }}
+                        style={{ width: 64, height: 64, borderRadius: 14 }}
+                        resizeMode="cover"
+                      />
+                    ) : (
+                      <LinearGradient
+                        key={`${item.uri}-${idx}`}
+                        colors={colors}
+                        style={{ width: 64, height: 64, borderRadius: 14, alignItems: 'center', justifyContent: 'center' }}
+                      >
+                        {typeIcon === 'video' && <Video size={24} color="#fff" />}
+                        {typeIcon === 'voice' && <Mic size={24} color="#fff" />}
+                      </LinearGradient>
+                    )
+                  })}
+
+                  {/* Write indicator if text exists */}
+                  {writtenText.trim() ? (
                     <LinearGradient
                       colors={['#34d399', '#14b8a6']}
-                      style={{ width: 80, height: 80, borderRadius: 16, alignItems: 'center', justifyContent: 'center' }}
+                      style={{ width: 64, height: 64, borderRadius: 14, alignItems: 'center', justifyContent: 'center' }}
                     >
-                      <FileText size={32} color="#fff" />
+                      <FileText size={24} color="#fff" />
                     </LinearGradient>
-                  )}
+                  ) : null}
+                </ScrollView>
 
-                  <View style={{ flex: 1 }}>
-                    <Text style={{ fontWeight: '500', fontSize: 16, color: '#111827' }}>
-                      {currentType?.label}
-                    </Text>
-                    <Text style={{ fontSize: 14, color: '#6b7280', marginTop: 4 }} numberOfLines={1}>
-                      {captureType === 'write' && writtenText
-                        ? writtenText.slice(0, 50) + (writtenText.length > 50 ? '...' : '')
-                        : captureType === 'voice'
-                          ? formatTime(recordingTime)
-                          : 'Captured moment'}
-                    </Text>
-                  </View>
-                </View>
+                {/* Summary text */}
+                <Text style={{ fontSize: 14, color: '#6b7280', marginBottom: 16 }}>
+                  {capturedItems.length > 0 && writtenText.trim()
+                    ? `${capturedItems.length} media item${capturedItems.length !== 1 ? 's' : ''} + text`
+                    : capturedItems.length > 0
+                      ? `${capturedItems.length} media item${capturedItems.length !== 1 ? 's' : ''}`
+                      : 'Written moment'}
+                </Text>
 
                 {/* Written text preview */}
-                {captureType === 'write' && writtenText ? (
+                {writtenText.trim() ? (
                   <View style={{
                     marginBottom: 24, padding: 16,
                     backgroundColor: '#f9fafb', borderRadius: 16,
                   }}>
-                    <Text style={{ color: '#374151', fontSize: 14, lineHeight: 20 }}>
+                    <Text style={{ color: '#374151', fontSize: 14, lineHeight: 20 }} numberOfLines={4}>
                       {writtenText}
                     </Text>
                   </View>
@@ -1025,28 +1174,26 @@ export default function CaptureScreen() {
                   </View>
                 </View>
 
-                {/* Caption (only for non-write types) */}
-                {captureType !== 'write' && (
-                  <View style={{ marginBottom: 32 }}>
-                    <Text style={{ fontSize: 14, fontWeight: '500', color: '#374151', marginBottom: 8 }}>
-                      Add a note (optional)
-                    </Text>
-                    <TextInput
-                      value={caption}
-                      onChangeText={setCaption}
-                      placeholder="Describe this moment..."
-                      placeholderTextColor="#9ca3af"
-                      multiline
-                      numberOfLines={3}
-                      style={{
-                        padding: 16, backgroundColor: '#f9fafb',
-                        borderRadius: 16, color: '#111827',
-                        fontSize: 14, lineHeight: 20,
-                        minHeight: 80, textAlignVertical: 'top',
-                      }}
-                    />
-                  </View>
-                )}
+                {/* Caption */}
+                <View style={{ marginBottom: 32 }}>
+                  <Text style={{ fontSize: 14, fontWeight: '500', color: '#374151', marginBottom: 8 }}>
+                    Add a note (optional)
+                  </Text>
+                  <TextInput
+                    value={caption}
+                    onChangeText={setCaption}
+                    placeholder="Describe this moment..."
+                    placeholderTextColor="#9ca3af"
+                    multiline
+                    numberOfLines={3}
+                    style={{
+                      padding: 16, backgroundColor: '#f9fafb',
+                      borderRadius: 16, color: '#111827',
+                      fontSize: 14, lineHeight: 20,
+                      minHeight: 80, textAlignVertical: 'top',
+                    }}
+                  />
+                </View>
 
                 {/* Save button */}
                 <TouchableOpacity
