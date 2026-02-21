@@ -288,36 +288,48 @@ export default function CaptureScreen() {
   // ============================================
   // QUICK-ADD from preview — triggers capture directly, stays on preview
   // ============================================
+  // Quick-add: capture directly (camera / record)
   const quickAddPhoto = () => {
     if (atItemLimit) return
-    if (Platform.OS === 'web') {
-      pickPhoto(false)
-    } else {
-      Alert.alert('Add Photo', 'Choose a source', [
-        { text: 'Camera', onPress: () => pickPhoto(true) },
-        { text: 'Gallery', onPress: () => pickPhoto(false) },
-        { text: 'Cancel', style: 'cancel' },
-      ])
-    }
+    pickPhoto(true)
   }
 
   const quickAddVideo = () => {
     if (atItemLimit) return
-    if (Platform.OS === 'web') {
-      pickVideo(false)
-    } else {
-      Alert.alert('Add Video', 'Choose a source', [
-        { text: 'Record', onPress: () => pickVideo(true) },
-        { text: 'Gallery', onPress: () => pickVideo(false) },
-        { text: 'Cancel', style: 'cancel' },
-      ])
-    }
+    pickVideo(true)
   }
 
   const quickAddVoice = () => {
     if (atItemLimit) return
     setCaptureType('voice')
     goToStep(STEP_CAPTURE)
+  }
+
+  // Quick-add: upload from files (any media type)
+  const quickAddUpload = async () => {
+    if (atItemLimit) return
+    const permResult = await ImagePicker.requestMediaLibraryPermissionsAsync()
+    if (!permResult.granted) {
+      Alert.alert('Permission needed', 'Please allow access to continue.')
+      return
+    }
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images', 'videos'],
+      quality: 0.8,
+      allowsMultipleSelection: true,
+      selectionLimit: MAX_ITEMS - capturedItems.length,
+    })
+    if (!result.canceled && result.assets.length > 0) {
+      const newItems: MediaItem[] = result.assets.map(asset => ({
+        uri: asset.uri,
+        mimeType: asset.mimeType || (asset.type === 'video' ? 'video/mp4' : 'image/jpeg'),
+        durationSeconds: asset.duration ? Math.round(asset.duration / 1000) : undefined,
+      }))
+      setCapturedItems(prev => [...prev, ...newItems].slice(0, MAX_ITEMS))
+      const nextStep = STEP_PREVIEW
+      setMaxReachedStep(prev => Math.max(prev, nextStep))
+      goToStep(nextStep)
+    }
   }
 
   // ============================================
@@ -598,33 +610,53 @@ export default function CaptureScreen() {
 
       {/* Quick-add bar + Continue */}
       <View style={{ paddingHorizontal: 24, paddingBottom: 48, gap: 14 }}>
-        {/* Quick-add type icons */}
+        {/* Quick-add: capture row + upload */}
         {!atItemLimit && (
-          <View style={{
-            flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 12,
-          }}>
-            <Text style={{ color: 'rgba(255,255,255,0.4)', fontSize: 12, marginRight: 4 }}>Add</Text>
-            {([
-              { type: 'photo' as const, icon: Camera, colors: ['#fb7185', '#ec4899'] as [string, string], onPress: quickAddPhoto },
-              { type: 'video' as const, icon: Video, colors: ['#a78bfa', '#8b5cf6'] as [string, string], onPress: quickAddVideo },
-              { type: 'voice' as const, icon: Mic, colors: ['#fbbf24', '#f97316'] as [string, string], onPress: quickAddVoice },
-            ]).map(({ type, icon: Icon, colors, onPress }) => (
-              <TouchableOpacity
-                key={type}
-                onPress={onPress}
-                activeOpacity={0.8}
-              >
-                <LinearGradient
-                  colors={colors}
-                  style={{
-                    width: 44, height: 44, borderRadius: 14,
-                    alignItems: 'center', justifyContent: 'center',
-                  }}
+          <View style={{ gap: 10 }}>
+            {/* Capture icons */}
+            <View style={{
+              flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 12,
+            }}>
+              {([
+                { type: 'photo' as const, label: 'Photo', icon: Camera, colors: ['#fb7185', '#ec4899'] as [string, string], onPress: quickAddPhoto },
+                { type: 'video' as const, label: 'Video', icon: Video, colors: ['#a78bfa', '#8b5cf6'] as [string, string], onPress: quickAddVideo },
+                { type: 'voice' as const, label: 'Voice', icon: Mic, colors: ['#fbbf24', '#f97316'] as [string, string], onPress: quickAddVoice },
+              ]).map(({ type, label, icon: Icon, colors, onPress }) => (
+                <TouchableOpacity
+                  key={type}
+                  onPress={onPress}
+                  activeOpacity={0.8}
+                  style={{ alignItems: 'center', gap: 4 }}
                 >
-                  <Icon size={20} color="#fff" />
-                </LinearGradient>
+                  <LinearGradient
+                    colors={colors}
+                    style={{
+                      width: 44, height: 44, borderRadius: 14,
+                      alignItems: 'center', justifyContent: 'center',
+                    }}
+                  >
+                    <Icon size={20} color="#fff" />
+                  </LinearGradient>
+                  <Text style={{ color: 'rgba(255,255,255,0.4)', fontSize: 10 }}>{label}</Text>
+                </TouchableOpacity>
+              ))}
+
+              {/* Upload from files */}
+              <TouchableOpacity
+                onPress={quickAddUpload}
+                activeOpacity={0.8}
+                style={{ alignItems: 'center', gap: 4 }}
+              >
+                <View style={{
+                  width: 44, height: 44, borderRadius: 14,
+                  backgroundColor: 'rgba(255,255,255,0.15)',
+                  alignItems: 'center', justifyContent: 'center',
+                }}>
+                  <Upload size={20} color="rgba(255,255,255,0.7)" />
+                </View>
+                <Text style={{ color: 'rgba(255,255,255,0.4)', fontSize: 10 }}>Upload</Text>
               </TouchableOpacity>
-            ))}
+            </View>
           </View>
         )}
 
