@@ -520,8 +520,9 @@ export default function CaptureScreen() {
           contentContainerStyle={{
             paddingHorizontal: 24, gap: 12,
             alignItems: 'center',
+            flexGrow: 1,
+            justifyContent: 'center',
           }}
-          style={{ flexGrow: 0 }}
         >
         {capturedItems.map((item, idx) => {
           const typeIcon = getTypeIcon(item.mimeType)
