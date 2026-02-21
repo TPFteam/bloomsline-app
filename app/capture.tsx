@@ -291,7 +291,8 @@ export default function CaptureScreen() {
   const quickAddPhoto = () => {
     if (atItemLimit) return
     if (Platform.OS === 'web') {
-      pickPhoto(false)
+      const useCamera = confirm('Use camera? OK = Camera, Cancel = Choose from files')
+      pickPhoto(useCamera)
     } else {
       Alert.alert('Add Photo', 'Choose a source', [
         { text: 'Camera', onPress: () => pickPhoto(true) },
@@ -304,7 +305,8 @@ export default function CaptureScreen() {
   const quickAddVideo = () => {
     if (atItemLimit) return
     if (Platform.OS === 'web') {
-      pickVideo(false)
+      const useCamera = confirm('Record video? OK = Record, Cancel = Choose from files')
+      pickVideo(useCamera)
     } else {
       Alert.alert('Add Video', 'Choose a source', [
         { text: 'Record', onPress: () => pickVideo(true) },
