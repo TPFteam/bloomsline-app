@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useRef, useMemo } from 'react'
+import { useState, useCallback, useEffect, useRef, useMemo, createElement } from 'react'
 import {
   View,
   Text,
@@ -1339,6 +1339,8 @@ function MasonryCard({
   index: number
   onPress: () => void
 }) {
+  const mediaItems = m.media_items ?? []
+  const isMulti = mediaItems.length > 1
   const isPhoto = m.type === 'photo' && m.media_url
   const isVideo = m.type === 'video'
   const isVoice = m.type === 'voice'
@@ -1348,6 +1350,13 @@ function MasonryCard({
 
   const dominantMood = m.moods?.[0]
   const moodColor = dominantMood ? (MOOD_COLORS[dominantMood] || '#6b7280') : theme.textFaint
+
+  const getMimeColor = (mime: string): [string, string] => {
+    if (mime.startsWith('image/')) return ['#fb7185', '#ec4899']
+    if (mime.startsWith('video/')) return ['#a78bfa', '#8b5cf6']
+    if (mime.startsWith('audio/')) return ['#fbbf24', '#f97316']
+    return ['#34d399', '#14b8a6']
+  }
 
   return (
     <TouchableOpacity
@@ -1359,7 +1368,40 @@ function MasonryCard({
         borderWidth: 1, borderColor: theme.cardBorder,
       }}
     >
-      {isPhoto ? (
+      {isMulti ? (
+        /* ---- MULTI-MEDIA: grid of mini thumbnails ---- */
+        <View style={{ padding: 4, flexDirection: 'row', flexWrap: 'wrap', gap: 4 }}>
+          {mediaItems.map((mi, idx) => {
+            const thumbSize = mediaItems.length <= 2
+              ? (width - 12) / 2
+              : (width - 16) / 3
+            const isImg = mi.mime_type.startsWith('image/')
+            const isVid = mi.mime_type.startsWith('video/')
+            const colors = getMimeColor(mi.mime_type)
+            return (
+              <View key={mi.id || idx} style={{
+                width: thumbSize, height: thumbSize,
+                borderRadius: 10, overflow: 'hidden',
+              }}>
+                {isImg ? (
+                  <Image
+                    source={{ uri: mi.media_url }}
+                    style={{ width: '100%', height: '100%' }}
+                    resizeMode="cover"
+                  />
+                ) : (
+                  <LinearGradient
+                    colors={colors}
+                    style={{ width: '100%', height: '100%', alignItems: 'center', justifyContent: 'center' }}
+                  >
+                    {isVid ? <Play size={16} color="#fff" style={{ marginLeft: 1 }} /> : <Mic size={16} color="#fff" />}
+                  </LinearGradient>
+                )}
+              </View>
+            )
+          })}
+        </View>
+      ) : isPhoto ? (
         <Image
           source={{ uri: m.media_url! }}
           style={{ width, aspectRatio: photoAspect }}
@@ -1415,19 +1457,6 @@ function MasonryCard({
             {m.text_content || m.caption || 'Written moment'}
           </Text>
         </LinearGradient>
-      )}
-
-      {/* Multi-media count badge */}
-      {(m.media_items?.length ?? 0) > 1 && (
-        <View style={{
-          position: 'absolute', top: 8, right: 8,
-          paddingHorizontal: 7, paddingVertical: 3, borderRadius: 999,
-          backgroundColor: 'rgba(0,0,0,0.55)',
-        }}>
-          <Text style={{ color: '#fff', fontSize: 10, fontWeight: '700' }}>
-            +{(m.media_items?.length ?? 1) - 1}
-          </Text>
-        </View>
       )}
 
       {/* Mood color strip + time */}
@@ -1606,7 +1635,7 @@ function MomentMediaCarousel({
       return (
         <LinearGradient
           colors={[theme.voiceGrad1, theme.voiceGrad2]}
-          style={{ width: '100%', height: 120, alignItems: 'center', justifyContent: 'center' }}
+          style={{ width: '100%', height: 160, alignItems: 'center', justifyContent: 'center', gap: 12 }}
         >
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3 }}>
             {Array.from({ length: 12 }).map((_, i) => (
@@ -1618,10 +1647,18 @@ function MomentMediaCarousel({
             ))}
           </View>
           {moment.duration_seconds != null && (
-            <Text style={{ fontSize: 13, color: theme.textMuted, marginTop: 8 }}>
+            <Text style={{ fontSize: 13, color: theme.textMuted }}>
               {Math.floor(moment.duration_seconds / 60)}:{String(moment.duration_seconds % 60).padStart(2, '0')}
             </Text>
           )}
+          {Platform.OS === 'web'
+            ? createElement('audio', {
+                src: moment.media_url,
+                controls: true,
+                style: { width: SCREEN_WIDTH - 80, maxWidth: 320, marginTop: 4 },
+              })
+            : null
+          }
         </LinearGradient>
       )
     }
@@ -1648,14 +1685,22 @@ function MomentMediaCarousel({
         {isAudio && (
           <LinearGradient
             colors={[theme.voiceGrad1, theme.voiceGrad2]}
-            style={{ width: SCREEN_WIDTH, height: 160, alignItems: 'center', justifyContent: 'center' }}
+            style={{ width: SCREEN_WIDTH, height: 200, alignItems: 'center', justifyContent: 'center', gap: 12 }}
           >
             <Mic size={40} color={theme.voicePlayIcon} />
             {item.duration_seconds != null && (
-              <Text style={{ fontSize: 14, color: theme.textMuted, marginTop: 8 }}>
+              <Text style={{ fontSize: 14, color: theme.textMuted }}>
                 {Math.floor(item.duration_seconds / 60)}:{String(item.duration_seconds % 60).padStart(2, '0')}
               </Text>
             )}
+            {Platform.OS === 'web'
+              ? createElement('audio', {
+                  src: item.media_url,
+                  controls: true,
+                  style: { width: SCREEN_WIDTH - 80, maxWidth: 320, marginTop: 4 },
+                })
+              : <Text style={{ fontSize: 12, color: theme.textFaint }}>Tap to play</Text>
+            }
           </LinearGradient>
         )}
       </View>

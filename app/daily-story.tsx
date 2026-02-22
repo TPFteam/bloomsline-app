@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useRef, createElement } from 'react'
 import {
   View,
   Text,
@@ -38,6 +38,14 @@ const SLIDE_DURATION = 5000
 // ============================================
 // TYPES
 // ============================================
+interface MomentMediaItem {
+  id: string
+  moment_id: string
+  media_url: string
+  mime_type: string
+  sort_order: number
+}
+
 interface Moment {
   id: string
   type: string
@@ -46,6 +54,7 @@ interface Moment {
   caption: string | null
   created_at: string
   moods: string[] | null
+  media_items?: MomentMediaItem[]
 }
 
 interface SeedLog {
@@ -65,6 +74,8 @@ interface RitualLog {
 interface StorySlide {
   kind: 'intro' | 'moment' | 'rituals' | 'seeds' | 'outro'
   data?: Moment | SeedLog[] | RitualLog[]
+  // For multi-media moments, override the displayed media
+  mediaOverride?: { url: string; mimeType: string }
 }
 
 // ============================================
@@ -465,6 +476,28 @@ export default function DailyStoryScreen() {
       ])
 
       const moments = (momentsRes.data ?? []) as Moment[]
+
+      // Fetch moment_media for multi-media moments
+      if (moments.length > 0) {
+        const momentIds = moments.map(m => m.id)
+        const { data: mediaData } = await supabase
+          .from('moment_media')
+          .select('id, moment_id, media_url, mime_type, sort_order')
+          .in('moment_id', momentIds)
+          .order('sort_order', { ascending: true })
+
+        if (mediaData) {
+          const mediaByMoment = new Map<string, MomentMediaItem[]>()
+          for (const row of mediaData as MomentMediaItem[]) {
+            if (!mediaByMoment.has(row.moment_id)) mediaByMoment.set(row.moment_id, [])
+            mediaByMoment.get(row.moment_id)!.push(row)
+          }
+          for (const m of moments) {
+            m.media_items = mediaByMoment.get(m.id) || []
+          }
+        }
+      }
+
       const seedLogs: SeedLog[] = (logsRes.data ?? []).map((l: any) => ({
         anchor_id: l.anchor_id,
         label: l.member_anchors?.label_en || 'Seed',
@@ -478,10 +511,26 @@ export default function DailyStoryScreen() {
         completed_at: r.created_at,
       }))
 
-      // Build slides
+      // Build slides — expand multi-media moments into individual slides
+      const momentSlides: StorySlide[] = []
+      for (const m of moments) {
+        if (m.media_items && m.media_items.length > 1) {
+          // Each media item becomes its own story slide
+          for (const mi of m.media_items) {
+            momentSlides.push({
+              kind: 'moment',
+              data: m,
+              mediaOverride: { url: mi.media_url, mimeType: mi.mime_type },
+            })
+          }
+        } else {
+          momentSlides.push({ kind: 'moment', data: m })
+        }
+      }
+
       const builtSlides: StorySlide[] = [
         { kind: 'intro' },
-        ...moments.map(m => ({ kind: 'moment' as const, data: m })),
+        ...momentSlides,
         ...(ritualLogs.length > 0 ? [{ kind: 'rituals' as const, data: ritualLogs }] : []),
         ...(seedLogs.length > 0 ? [{ kind: 'seeds' as const, data: seedLogs }] : []),
         { kind: 'outro' },
@@ -615,13 +664,20 @@ export default function DailyStoryScreen() {
         {slide.kind === 'moment' && (() => {
           const m = slide.data as Moment
           const time = new Date(m.created_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
-          const TypeIcon = m.type === 'photo' ? Camera : m.type === 'video' ? VideoIcon : m.type === 'voice' ? Mic : PenLine
 
-          // Photo moment
-          if (m.type === 'photo' && m.media_url) {
+          // Determine the effective media URL and type for this slide
+          const effectiveUrl = slide.mediaOverride?.url ?? m.media_url
+          const effectiveMime = slide.mediaOverride?.mimeType ?? null
+          const effectiveType = effectiveMime
+            ? (effectiveMime.startsWith('image/') ? 'photo' : effectiveMime.startsWith('video/') ? 'video' : effectiveMime.startsWith('audio/') ? 'voice' : m.type)
+            : m.type
+          const TypeIcon = effectiveType === 'photo' ? Camera : effectiveType === 'video' ? VideoIcon : effectiveType === 'voice' ? Mic : PenLine
+
+          // Photo slide
+          if (effectiveType === 'photo' && effectiveUrl) {
             return (
               <View style={{ width: SW, height: SH }}>
-                <Image source={{ uri: m.media_url }} style={{ width: SW, height: SH }} resizeMode="cover" />
+                <Image source={{ uri: effectiveUrl }} style={{ width: SW, height: SH }} resizeMode="cover" />
                 <LinearGradient
                   colors={['rgba(0,0,0,0.3)', 'transparent', 'rgba(0,0,0,0.6)']}
                   style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }}
@@ -640,7 +696,7 @@ export default function DailyStoryScreen() {
           }
 
           // Write moment
-          if (m.type === 'write') {
+          if (effectiveType === 'write') {
             return (
               <LinearGradient
                 colors={['#f59e0b', '#f97316', '#f43e5e']}
@@ -664,8 +720,8 @@ export default function DailyStoryScreen() {
             )
           }
 
-          // Voice moment
-          if (m.type === 'voice') {
+          // Voice slide
+          if (effectiveType === 'voice' && effectiveUrl) {
             return (
               <LinearGradient
                 colors={['#7c3aed', '#4f46e5', '#2563eb']}
@@ -674,9 +730,9 @@ export default function DailyStoryScreen() {
                 <TouchableOpacity
                   onPress={(e) => {
                     e.stopPropagation?.()
-                    if (m.media_url) {
+                    if (effectiveUrl) {
                       if (playerRef.current) playerRef.current.release()
-                      const player = createAudioPlayer(m.media_url)
+                      const player = createAudioPlayer(effectiveUrl)
                       playerRef.current = player
                       player.play()
                     }
@@ -703,18 +759,29 @@ export default function DailyStoryScreen() {
             )
           }
 
-          // Video moment
-          if (m.type === 'video' && m.media_url) {
+          // Video slide
+          if (effectiveType === 'video' && effectiveUrl) {
             return (
               <View style={{ width: SW, height: SH, backgroundColor: '#000' }}>
-                <AVVideo
-                  source={{ uri: m.media_url }}
-                  style={{ width: SW, height: SH }}
-                  resizeMode={ResizeMode.CONTAIN}
-                  shouldPlay
-                  isLooping
-                  useNativeControls
-                />
+                {Platform.OS === 'web' ? (
+                  createElement('video', {
+                    src: effectiveUrl,
+                    autoPlay: true,
+                    loop: true,
+                    playsInline: true,
+                    controls: true,
+                    style: { width: SW, height: SH, objectFit: 'contain', backgroundColor: '#000' },
+                  })
+                ) : (
+                  <AVVideo
+                    source={{ uri: effectiveUrl }}
+                    style={{ width: SW, height: SH }}
+                    resizeMode={ResizeMode.CONTAIN}
+                    shouldPlay
+                    isLooping
+                    useNativeControls
+                  />
+                )}
                 <LinearGradient
                   colors={['rgba(0,0,0,0.3)', 'transparent', 'rgba(0,0,0,0.6)']}
                   pointerEvents="none"
@@ -733,7 +800,29 @@ export default function DailyStoryScreen() {
             )
           }
 
-          // Fallback
+          // Fallback — single media_url without type match
+          if (effectiveUrl) {
+            return (
+              <View style={{ width: SW, height: SH }}>
+                <Image source={{ uri: effectiveUrl }} style={{ width: SW, height: SH }} resizeMode="cover" />
+                <LinearGradient
+                  colors={['rgba(0,0,0,0.3)', 'transparent', 'rgba(0,0,0,0.6)']}
+                  style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }}
+                />
+                <View style={{ position: 'absolute', bottom: 80, left: 24, right: 24 }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                    <TypeIcon size={14} color="rgba(255,255,255,0.7)" />
+                    <Text style={{ fontSize: 13, color: 'rgba(255,255,255,0.7)' }}>{time}</Text>
+                  </View>
+                  {m.caption ? (
+                    <Text style={{ fontSize: 20, fontWeight: '500', color: '#fff' }}>{m.caption}</Text>
+                  ) : null}
+                </View>
+              </View>
+            )
+          }
+
+          // No media fallback
           return (
             <LinearGradient
               colors={['#374151', '#111827']}

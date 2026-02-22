@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useMemo, useRef } from 'react'
+import { useEffect, useState, useCallback, useMemo, useRef, createElement } from 'react'
 import {
   View,
   Text,
@@ -13,6 +13,7 @@ import {
   Animated,
   Easing,
   TextInput,
+  Platform,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { LinearGradient } from 'expo-linear-gradient'
@@ -71,6 +72,7 @@ import {
   Smile,
   Shield,
   Check,
+  Mic,
   Pause,
   Maximize2,
   Volume2,
@@ -82,7 +84,40 @@ import { fetchMemberRituals, fetchTodayCompletions, type MemberRitual, type Ritu
 import * as VideoThumbnails from 'expo-video-thumbnails'
 import { Video, ResizeMode } from 'expo-av'
 
-const { width: SCREEN_WIDTH } = Dimensions.get('window')
+const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window')
+
+// Cross-platform audio player for voice notes in moment detail
+function VoiceNotePlayer({ uri }: { uri: string }) {
+  if (Platform.OS === 'web') {
+    return (
+      <View style={{ alignItems: 'center', gap: 16, paddingHorizontal: 32 }}>
+        <LinearGradient
+          colors={['#fbbf24', '#f97316']}
+          style={{ width: 80, height: 80, borderRadius: 40, alignItems: 'center', justifyContent: 'center' }}
+        >
+          <Mic size={36} color="#fff" />
+        </LinearGradient>
+        {createElement('audio', {
+          src: uri,
+          controls: true,
+          style: { width: SCREEN_WIDTH - 80, maxWidth: 320, marginTop: 8 },
+        })}
+      </View>
+    )
+  }
+  // Native: use expo-av Audio
+  return (
+    <View style={{ alignItems: 'center', gap: 16 }}>
+      <LinearGradient
+        colors={['#fbbf24', '#f97316']}
+        style={{ width: 80, height: 80, borderRadius: 40, alignItems: 'center', justifyContent: 'center' }}
+      >
+        <Mic size={36} color="#fff" />
+      </LinearGradient>
+      <Text style={{ color: 'rgba(255,255,255,0.5)', fontSize: 14 }}>Voice note</Text>
+    </View>
+  )
+}
 
 // Ritual icon mapping
 const RITUAL_ICONS: Record<string, any> = {
@@ -161,6 +196,14 @@ type Anchor = {
   type: 'grow' | 'letgo'
 }
 
+type MomentMediaItem = {
+  id: string
+  moment_id: string
+  media_url: string
+  mime_type: string
+  sort_order: number
+}
+
 type MomentItem = {
   id: string
   created_at: string
@@ -170,6 +213,7 @@ type MomentItem = {
   media_url: string | null
   thumbnail_url: string | null
   text_content: string | null
+  media_items?: MomentMediaItem[]
 }
 
 function RotatingRing() {
@@ -367,7 +411,30 @@ export default function HomeScreen() {
       fetchTodayCompletions(member.id),
     ])
 
-    setMoments((momentsRes.data ?? []) as MomentItem[])
+    const momentsList = (momentsRes.data ?? []) as MomentItem[]
+
+    // Fetch media items for moments that may have multiple
+    if (momentsList.length > 0) {
+      const momentIds = momentsList.map(m => m.id)
+      const { data: mediaData } = await supabase
+        .from('moment_media')
+        .select('id, moment_id, media_url, mime_type, sort_order')
+        .in('moment_id', momentIds)
+        .order('sort_order', { ascending: true })
+
+      if (mediaData) {
+        const mediaByMoment = new Map<string, MomentMediaItem[]>()
+        for (const row of mediaData as MomentMediaItem[]) {
+          if (!mediaByMoment.has(row.moment_id)) mediaByMoment.set(row.moment_id, [])
+          mediaByMoment.get(row.moment_id)!.push(row)
+        }
+        for (const m of momentsList) {
+          m.media_items = mediaByMoment.get(m.id) || []
+        }
+      }
+    }
+
+    setMoments(momentsList)
     setAnchors((anchorsRes.data ?? []) as Anchor[])
     setMemberRituals(ritualsData)
     setRitualCompletions(completionsData)
@@ -895,10 +962,12 @@ export default function HomeScreen() {
                     const y = 100 - ((score / 100) * 70 + 15)
                     const colors = getMoodColors(m.moods?.[0])
 
-                    const isPhoto = m.type === 'photo' && m.media_url
+                    const hasPhoto = m.type === 'photo' || (m.type === 'mixed' && m.media_items?.some(mi => mi.mime_type?.startsWith('image/')))
+                    const isPhoto = hasPhoto && m.media_url
                     const isVideo = m.type === 'video'
                     const videoThumb = isVideo ? (m.thumbnail_url || videoThumbs[m.id]) : null
                     const isCard = isPhoto || isVideo
+                    const mediaCount = m.media_items?.length ?? 0
 
                     return (
                       <TouchableOpacity
@@ -925,6 +994,17 @@ export default function HomeScreen() {
                               style={{ width: '100%', height: '100%' }}
                               resizeMode="cover"
                             />
+                            {mediaCount > 1 && (
+                              <View style={{
+                                position: 'absolute', bottom: 1, right: 1,
+                                minWidth: 14, height: 14, borderRadius: 7,
+                                backgroundColor: 'rgba(0,0,0,0.65)',
+                                alignItems: 'center', justifyContent: 'center',
+                                paddingHorizontal: 2,
+                              }}>
+                                <Text style={{ color: '#fff', fontSize: 7, fontWeight: '800' }}>{mediaCount}</Text>
+                              </View>
+                            )}
                           </View>
                         ) : isVideo ? (
                           <View style={{
@@ -972,6 +1052,18 @@ export default function HomeScreen() {
                             }}
                           >
                             <MoodIcon mood={m.moods?.[0]} />
+                            {mediaCount > 1 && (
+                              <View style={{
+                                position: 'absolute', bottom: -3, right: -3,
+                                minWidth: 14, height: 14, borderRadius: 7,
+                                backgroundColor: '#10b981',
+                                alignItems: 'center', justifyContent: 'center',
+                                paddingHorizontal: 2,
+                                borderWidth: 1.5, borderColor: '#fff',
+                              }}>
+                                <Text style={{ color: '#fff', fontSize: 7, fontWeight: '800' }}>{mediaCount}</Text>
+                              </View>
+                            )}
                           </LinearGradient>
                         )}
                       </TouchableOpacity>
@@ -1293,11 +1385,14 @@ export default function HomeScreen() {
           const moodColors = getMoodColors(viewingMoment.moods?.[0])
           const time = new Date(viewingMoment.created_at)
           const timeStr = time.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-          const hasImage = viewingMoment.type === 'photo' && viewingMoment.media_url
+          const mediaItems = viewingMoment.media_items ?? []
+          const hasMedia = viewingMoment.media_url || mediaItems.length > 0
+          const hasImage = (viewingMoment.type === 'photo' || viewingMoment.type === 'mixed') && hasMedia
           const hasVideo = viewingMoment.type === 'video' && viewingMoment.media_url
+          const showLightbox = hasImage || hasVideo || mediaItems.length > 0
 
-          return hasImage || hasVideo ? (
-            /* Photo/Video lightbox — dark backdrop, reel-style */
+          return showLightbox ? (
+            /* Media lightbox — dark backdrop, swipeable carousel for multi-media */
             <View style={{ flex: 1, backgroundColor: '#000' }}>
               {/* Close button */}
               <SafeAreaView edges={['top']} style={{ position: 'absolute', top: 0, left: 0, right: 0, zIndex: 10 }}>
@@ -1315,8 +1410,51 @@ export default function HomeScreen() {
                 </View>
               </SafeAreaView>
 
-              {/* Media — takes up available space */}
-              {hasVideo ? (
+              {/* Media — carousel for multi, single for one */}
+              {mediaItems.length > 1 ? (
+                <View style={{ flex: 1 }}>
+                  <ScrollView
+                    horizontal
+                    pagingEnabled
+                    showsHorizontalScrollIndicator={false}
+                    style={{ flex: 1 }}
+                  >
+                    {mediaItems.map((mi) => {
+                      const isImg = mi.mime_type?.startsWith('image/')
+                      const isVid = mi.mime_type?.startsWith('video/')
+                      const isAud = mi.mime_type?.startsWith('audio/')
+                      const mediaHeight = SCREEN_HEIGHT - 200
+                      return (
+                        <View key={mi.id} style={{ width: SCREEN_WIDTH, height: mediaHeight, justifyContent: 'center', alignItems: 'center' }}>
+                          {isImg ? (
+                            <Image
+                              source={{ uri: mi.media_url }}
+                              style={{ width: SCREEN_WIDTH, height: mediaHeight }}
+                              resizeMode="contain"
+                            />
+                          ) : isVid ? (
+                            <FullscreenVideoPlayer uri={mi.media_url} />
+                          ) : isAud ? (
+                            <VoiceNotePlayer uri={mi.media_url} />
+                          ) : null}
+                        </View>
+                      )
+                    })}
+                  </ScrollView>
+                  {/* Page indicator */}
+                  <View style={{
+                    position: 'absolute', bottom: 8, left: 0, right: 0,
+                    flexDirection: 'row', justifyContent: 'center', gap: 6,
+                  }}>
+                    {mediaItems.map((_, i) => (
+                      <View key={i} style={{
+                        width: 6, height: 6, borderRadius: 3,
+                        backgroundColor: 'rgba(255,255,255,0.5)',
+                      }} />
+                    ))}
+                  </View>
+                </View>
+              ) : hasVideo ? (
                 <FullscreenVideoPlayer uri={viewingMoment.media_url!} />
               ) : (
                 <Pressable onPress={() => setViewingMoment(null)} style={{ flex: 1, justifyContent: 'center' }}>
@@ -1346,6 +1484,11 @@ export default function HomeScreen() {
                   {viewingMoment.caption && (
                     <Text style={{ color: 'rgba(255,255,255,0.85)', fontSize: 15, fontWeight: '500', marginBottom: 4 }}>
                       {viewingMoment.caption}
+                    </Text>
+                  )}
+                  {mediaItems.length > 1 && (
+                    <Text style={{ color: 'rgba(255,255,255,0.4)', fontSize: 12, marginBottom: 2 }}>
+                      {mediaItems.length} items · Swipe to browse
                     </Text>
                   )}
                   <Text style={{ color: 'rgba(255,255,255,0.4)', fontSize: 12 }}>{timeStr}</Text>
