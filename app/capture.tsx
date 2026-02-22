@@ -780,105 +780,44 @@ export default function CaptureScreen() {
 
     return (
       <View style={{ flex: 1, justifyContent: 'space-between' }}>
-        {/* Fullscreen overlay for expanded item */}
-        {expandedIndex !== null && capturedItems[expandedIndex] && (() => {
-          const expItem = capturedItems[expandedIndex]
-          const expType = getTypeIcon(expItem.mimeType)
-          return (
-            <View style={{
-              position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
-              zIndex: 100, backgroundColor: 'rgba(0,0,0,0.9)',
-              alignItems: 'center', justifyContent: 'center',
-            }}>
-              {expType === 'photo' ? (
-                <Image
-                  source={{ uri: expItem.uri }}
-                  style={{ width: SCREEN_WIDTH, height: SCREEN_WIDTH }}
-                  resizeMode="contain"
-                />
-              ) : expType === 'video' ? (
-                <VideoPlayer
-                  uri={expItem.uri}
-                  width={SCREEN_WIDTH}
-                  height={SCREEN_WIDTH * 9 / 16}
-                  autoPlay
-                />
-              ) : (
-                renderMediaThumb(expItem, SCREEN_WIDTH - 48, 24, expandedIndex)
-              )}
-              {/* Minimize button */}
-              <TouchableOpacity
-                onPress={() => setExpandedIndex(null)}
-                style={{
-                  position: 'absolute', top: 16, right: 16,
-                  width: 40, height: 40, borderRadius: 20,
-                  backgroundColor: 'rgba(255,255,255,0.2)',
-                  alignItems: 'center', justifyContent: 'center',
-                }}
-              >
-                <Minimize2 size={20} color="#fff" />
-              </TouchableOpacity>
-              {/* Delete from expanded view */}
-              <TouchableOpacity
-                onPress={() => {
-                  const idx = expandedIndex
-                  setExpandedIndex(null)
-                  removeMediaItem(idx)
-                }}
-                style={{
-                  position: 'absolute', top: 16, left: 16,
-                  width: 40, height: 40, borderRadius: 20,
-                  backgroundColor: 'rgba(255,255,255,0.2)',
-                  alignItems: 'center', justifyContent: 'center',
-                }}
-              >
-                <Trash2 size={20} color="#fff" />
-              </TouchableOpacity>
-            </View>
-          )
-        })()}
+        {/* Fullscreen overlay removed — now rendered at top level */}
 
         {isSingle && singleItem ? (
-          /* ---- SINGLE ITEM: fullscreen preview ---- */
-          <View style={{ flex: 1 }}>
+          /* ---- SINGLE ITEM: centered preview ---- */
+          <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 24 }}>
             {singleType === 'photo' ? (
-              <View style={{ flex: 1 }}>
+              <TouchableOpacity
+                activeOpacity={0.9}
+                onPress={() => setExpandedIndex(0)}
+                style={{
+                  width: SCREEN_WIDTH - 48,
+                  aspectRatio: 3 / 4,
+                  maxHeight: '80%',
+                  borderRadius: 24,
+                  overflow: 'hidden',
+                }}
+              >
                 <Image
                   source={{ uri: singleItem.uri }}
-                  style={{ flex: 1 }}
+                  style={{ width: '100%', height: '100%', borderRadius: 24 }}
                   resizeMode="cover"
                 />
-                <LinearGradient
-                  colors={['transparent', 'rgba(0,0,0,0.6)']}
-                  style={{ position: 'absolute', left: 0, right: 0, bottom: 0, height: 200 }}
-                />
-              </View>
+              </TouchableOpacity>
             ) : singleType === 'video' ? (
-              <View style={{ flex: 1, justifyContent: 'center', backgroundColor: '#000' }}>
+              <View style={{
+                width: SCREEN_WIDTH - 48,
+                borderRadius: 24,
+                overflow: 'hidden',
+              }}>
                 <VideoPlayer
                   uri={singleItem.uri}
-                  width={SCREEN_WIDTH}
-                  height={SCREEN_WIDTH * 9 / 16}
+                  width={SCREEN_WIDTH - 48}
+                  height={(SCREEN_WIDTH - 48) * 9 / 16}
                 />
               </View>
             ) : (
-              <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
-                {renderMediaThumb(singleItem, 200, 24, 0)}
-              </View>
+              renderMediaThumb(singleItem, 200, 24, 0)
             )}
-
-            {/* Delete overlay */}
-            <TouchableOpacity
-              onPress={() => removeMediaItem(0)}
-              style={{
-                position: 'absolute', top: 16, right: 16,
-                width: 40, height: 40, borderRadius: 20,
-                backgroundColor: 'rgba(0,0,0,0.5)',
-                alignItems: 'center', justifyContent: 'center',
-              }}
-            >
-              <Trash2 size={20} color="#fff" />
-            </TouchableOpacity>
           </View>
         ) : (
           /* ---- MULTIPLE ITEMS: compact grid ---- */
@@ -1058,6 +997,48 @@ export default function CaptureScreen() {
       style={{ flex: 1 }}
     >
       <SafeAreaView style={{ flex: 1 }}>
+        {/* Fullscreen media overlay */}
+        {expandedIndex !== null && capturedItems[expandedIndex] && (() => {
+          const expItem = capturedItems[expandedIndex]
+          const expType = getTypeIcon(expItem.mimeType)
+          return (
+            <View style={{
+              position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
+              zIndex: 999, backgroundColor: '#000',
+              alignItems: 'center', justifyContent: 'center',
+            }}>
+              {expType === 'photo' ? (
+                <Image
+                  source={{ uri: expItem.uri }}
+                  style={{ width: '100%', height: '100%' }}
+                  resizeMode="contain"
+                />
+              ) : expType === 'video' ? (
+                <VideoPlayer
+                  uri={expItem.uri}
+                  width={SCREEN_WIDTH}
+                  height={SCREEN_WIDTH * 9 / 16}
+                  autoPlay
+                />
+              ) : (
+                renderMediaThumb(expItem, SCREEN_WIDTH - 48, 24, expandedIndex)
+              )}
+              {/* Minimize button */}
+              <TouchableOpacity
+                onPress={() => setExpandedIndex(null)}
+                style={{
+                  position: 'absolute', top: 16, left: 16,
+                  width: 44, height: 44, borderRadius: 22,
+                  backgroundColor: 'rgba(255,255,255,0.15)',
+                  alignItems: 'center', justifyContent: 'center',
+                }}
+              >
+                <ChevronLeft size={22} color="#fff" />
+              </TouchableOpacity>
+            </View>
+          )
+        })()}
+
         {/* Header */}
         <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 12 }}>
           <TouchableOpacity
